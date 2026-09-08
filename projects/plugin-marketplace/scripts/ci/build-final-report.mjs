@@ -46,24 +46,26 @@ const semanticMarkdown = semanticMarkdownPath && fs.existsSync(semanticMarkdownP
   ? fs.readFileSync(semanticMarkdownPath, 'utf8').trim()
   : '## Semantic Audit\n\n- Audit was skipped or did not produce a structured report.';
 const findingLines = report.findings.length
-  ? report.findings.map((finding) => `- **${finding.id ?? finding.severity}** ${finding.title ?? ''} (${finding.scope ?? 'unknown scope'})`).join('\n')
-  : '- None';
+  ? report.findings.map((finding) => `- **${finding.id ?? finding.severity}** ${finding.title ?? ''}（范围：${finding.scope ?? '未知'}）`).join('\n')
+  : '- 无';
 const markdown = [
-  '# Plugin CI/CD Report',
+  '# 插件 CI/CD 报告',
   '',
-  `- Decision: **${report.decision}**`,
-  `- Changed plugins: ${changedPlugins.join(', ') || 'none'}`,
+  `- 最终结论：**${report.decision}**`,
+  `- 变更插件：${changedPlugins.join(', ') || '无'}`,
   '',
-  '## Checks',
+  '## 检查结果',
   '',
-  `- Deterministic validation: **${deterministicStatus}**`,
-  `- Semantic audit: **${semanticResult}**`,
-  `- Blocking findings: **${report.checks.semantic.blockingFindings}**`,
-  `- Review findings: **${report.checks.semantic.reviewFindings}**`,
+  `- 结构与配置检查：**${deterministicStatus}**`,
+  `- 语义审计：**${semanticResult}**`,
+  `- 阻断问题：**${report.checks.semantic.blockingFindings}**`,
+  `- 待确认问题：**${report.checks.semantic.reviewFindings}**`,
   '',
-  '## Findings',
+  '## 发现的问题',
   '',
   findingLines,
+  '',
+  '## 语义审计详情',
   '',
   semanticMarkdown,
   '',

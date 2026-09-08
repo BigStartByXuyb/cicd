@@ -25,7 +25,8 @@ test('builds deterministic and final reports from machine-readable inputs', () =
     const report = JSON.parse(fs.readFileSync(finalJson, 'utf8'));
     assert.equal(report.decision, 'REVIEW');
     assert.equal(report.checks.semantic.reviewFindings, 1);
-    assert.match(fs.readFileSync(finalMarkdown, 'utf8'), /Decision: \*\*REVIEW\*\*/);
+    assert.match(fs.readFileSync(finalMarkdown, 'utf8'), /最终结论：\*\*REVIEW\*\*/);
+    assert.match(fs.readFileSync(finalMarkdown, 'utf8'), /阻断问题：\*\*0\*\*/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

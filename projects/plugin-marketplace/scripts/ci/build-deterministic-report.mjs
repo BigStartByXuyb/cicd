@@ -22,15 +22,15 @@ const report = {
   plugins: validation.plugins ?? [],
 };
 const markdown = [
-  '# Deterministic Validation',
+  '# 结构与配置检查报告',
   '',
-  `- Result: **${report.status}**`,
-  `- Changed plugins: ${changedPlugins.join(', ') || 'none'}`,
-  `- Errors: ${report.errors.length}`,
+  `- 检查结果：**${report.status}**`,
+  `- 变更插件：${changedPlugins.join(', ') || '无'}`,
+  `- 错误数量：${report.errors.length}`,
   '',
-  '## Findings',
+  '## 检查发现',
   '',
-  ...(report.errors.length ? report.errors.map((error) => `- ${JSON.stringify(error)}`) : ['- None']),
+  ...(report.errors.length ? report.errors.map((error) => `- ${JSON.stringify(error)}`) : ['- 无']),
   '',
 ].join('\n');
 
