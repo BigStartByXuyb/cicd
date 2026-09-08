@@ -8,6 +8,17 @@ on:
         required: false
         type: string
         default: v2
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      FEISHU_APP_ID:
+        required: true
+      FEISHU_APP_SECRET:
+        required: true
+      FEISHU_DEFAULT_CHAT_ID:
+        required: true
+      FEISHU_RECIPIENT_MAP_JSON:
+        required: true
 
 permissions:
   contents: read
@@ -40,7 +51,7 @@ jobs:
       - name: Checkout CI implementation
         uses: actions/checkout@v4
         with:
-          repository: BigStartByXuyb/cicd
+          repository: ${{ github.repository_owner }}/cicd
           ref: ${{ inputs.ci_ref }}
           path: ci
           persist-credentials: false
@@ -88,7 +99,6 @@ jobs:
     needs: deterministic-validation
     if: ${{ needs.deterministic-validation.result == 'success' }}
     runs-on: ubuntu-latest
-    environment: plugin-cicd-prod
     outputs:
       audit_result: ${{ steps.parse-report.outputs.result }}
     steps:
@@ -104,7 +114,7 @@ jobs:
       - name: Checkout CI implementation
         uses: actions/checkout@v4
         with:
-          repository: BigStartByXuyb/cicd
+          repository: ${{ github.repository_owner }}/cicd
           ref: ${{ inputs.ci_ref }}
           path: ci
           persist-credentials: false
@@ -174,7 +184,7 @@ jobs:
       - name: Checkout CI implementation
         uses: actions/checkout@v4
         with:
-          repository: BigStartByXuyb/cicd
+          repository: ${{ github.repository_owner }}/cicd
           ref: ${{ inputs.ci_ref }}
           path: ci
           persist-credentials: false
@@ -212,12 +222,11 @@ jobs:
     needs: [deterministic-validation, semantic-audit, publish-pr-report]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    environment: plugin-cicd-prod
     steps:
       - name: Checkout CI implementation
         uses: actions/checkout@v4
         with:
-          repository: BigStartByXuyb/cicd
+          repository: ${{ github.repository_owner }}/cicd
           ref: ${{ inputs.ci_ref }}
           path: ci
           persist-credentials: false

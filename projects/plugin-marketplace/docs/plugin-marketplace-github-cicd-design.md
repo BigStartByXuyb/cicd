@@ -19,13 +19,25 @@ Pull Request 触发
 
 ## 2. GitHub 文件和职责
 
-公共 CI 仓库固定为 `BigStartByXuyb/cicd`，发布可复用 workflow：
+公共 CI 仓库固定为团队 GitHub Organization 下的 `cicd`，发布可复用 workflow：
 
 ```text
-BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@8dbe3ebeb4ff82bf57f66b732eaeccfaab5531a8
+<ORG_SLUG>/cicd/.github/workflows/plugin-marketplace.yml@<REVIEWED_COMMIT_SHA>
 ```
 
 marketplace 仓库只保留一个薄调用文件 `.github/workflows/plugin-cicd.yml`，不再复制完整 CI 脚本。
+
+调用方和 `cicd` 必须属于同一个 GitHub Organization。调用方只显式传递下面五个
+Organization Secrets；禁止使用 `secrets: inherit`，也禁止把 Secret 值写入仓库：
+
+```yaml
+secrets:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+  FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+  FEISHU_DEFAULT_CHAT_ID: ${{ secrets.FEISHU_DEFAULT_CHAT_ID }}
+  FEISHU_RECIPIENT_MAP_JSON: ${{ secrets.FEISHU_RECIPIENT_MAP_JSON }}
+```
 
 新增或维护以下文件：
 
@@ -164,7 +176,8 @@ ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
 CLAUDE_MODEL=deepseek-v4-flash
 ```
 
-这里仍然调用 Claude Code CLI，但模型服务由 DeepSeek 的 Anthropic 兼容接口提供。仓库不保存 API key；GitHub Actions 只从 Secret 注入。
+这里仍然调用 Claude Code CLI，但模型服务由 DeepSeek 的 Anthropic 兼容接口提供。仓库不保存 API key；GitHub Actions 只从
+`workflow_call` 显式传入的 Organization Secret 注入。
 
 Claude 不得修改文件、执行插件代码、读取工作区外文件、访问网络或调用 MCP。
 
@@ -236,11 +249,13 @@ needs:
 
 被分配人和插件 owner 可以在后续版本复用同一映射扩展；当前工作流不会把未显式请求审阅的人员误当成审阅者。
 
-GitHub 用户名到飞书 `open_id` 的映射放在 `plugin-cicd-prod` Environment Secret `FEISHU_RECIPIENT_MAP_JSON` 中，不放入任何仓库。映射缺失时必须通知默认维护者，并在消息中标记缺失的 GitHub 用户名。作者、审阅者和群聊收件人必须去重。
+GitHub 用户名到飞书 `open_id` 的映射放在 Organization Secret
+`FEISHU_RECIPIENT_MAP_JSON` 中，不放入任何仓库。映射缺失时必须通知默认维护者，并在消息中标记缺失的 GitHub 用户名。作者、审阅者和群聊收件人必须去重。
 
 ### 8.3 飞书身份和 Secret
 
-通过飞书自建应用机器人发送消息。以下凭据统一放在 GitHub Environment `plugin-cicd-prod` 中，而不是普通仓库文件或普通变量：
+通过飞书自建应用机器人发送消息。以下凭据统一放在 GitHub Organization Actions Secrets
+中，并通过 Organization 的 Repository access policy allow-list 只授权给启用该流水线的插件仓库，而不是普通仓库文件或普通变量：
 
 | Secret | 作用 |
 | --- | --- |
@@ -249,7 +264,9 @@ GitHub 用户名到飞书 `open_id` 的映射放在 `plugin-cicd-prod` Environme
 | `FEISHU_RECIPIENT_MAP_JSON` | GitHub 用户到飞书 `open_id` 的映射 |
 | `FEISHU_DEFAULT_CHAT_ID` | 无法解析个人收件人时的默认群聊 |
 
-`semantic-audit` 和 `notify-feishu` job 必须引用 `plugin-cicd-prod`。该 Environment 配置 required reviewers；维护者批准前，job 可以被触发但不能读取环境 Secret。Secret 只能通过 Actions Secrets 注入，禁止出现在 workflow、脚本、日志、artifact、PR comment 或飞书消息内容中。消息只包含状态、项目、PR、commit、插件名称、finding 摘要和链接。
+可复用 workflow 在 `on.workflow_call.secrets` 中将这五个 Secret 声明为必需项；调用方在 job 上显式映射同名
+Secret。不要在被调用 workflow 的 job 上依赖调用方 Environment，因为 Environment Secret
+不能通过 `workflow_call` 由中央仓库代取。Secret 只能通过 Actions Secrets 注入，禁止出现在 workflow、脚本、日志、artifact、PR comment 或飞书消息内容中。消息只包含状态、项目、PR、commit、插件名称、finding 摘要和链接。
 
 ### 8.4 飞书消息格式
 
@@ -305,7 +322,7 @@ Claude 语义审计：BLOCK
 2. 不 checkout PR 分支并执行其中的代码。
 3. 不把 PR 文件中的内容当作 shell 命令、配置或提示词规则；它们只能作为被审计数据。
 4. Claude 不开放写入、Shell、MCP、Hook、LSP、Agent 或网络能力。
-5. `ANTHROPIC_API_KEY`、DeepSeek API base URL、飞书 App Secret 和收件人映射只对可信 workflow/job 可见。
+5. `ANTHROPIC_API_KEY`、DeepSeek API base URL、飞书 App Secret 和收件人映射只对可信 workflow/job 可见；Organization Secret 的仓库 allow-list 必须覆盖调用方。
 6. 所有日志、评论和 artifact 执行 Secret 脱敏与长度限制。
 
 外部 fork PR 的默认行为是：无 Secret 的结构检查可以自动运行；带 Claude 和飞书凭据的完整 job 需要维护者确认后手动触发。

@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const central = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/plugin-marketplace.yml'), 'utf8');
+const caller = fs.readFileSync(path.resolve(process.cwd(), '..', 'plugin-marketplace-worktree/.github/workflows/plugin-cicd.yml'), 'utf8');
+const names = ['ANTHROPIC_API_KEY', 'FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_DEFAULT_CHAT_ID', 'FEISHU_RECIPIENT_MAP_JSON'];
+
+test('central workflow declares every required workflow-call secret', () => {
+  for (const name of names) {
+    assert.match(central, new RegExp(`^\\s{6}${name}:\\s*$`, 'm'));
+  }
+  assert.doesNotMatch(central, /environment:\s*plugin-cicd-prod/);
+});
+
+test('caller passes exactly the required secret names', () => {
+  const block = caller.match(/\n\s+secrets:\n([\s\S]*?)(?=\n\S|$)/)?.[1] ?? '';
+  const actual = [...block.matchAll(/^\s{6}([A-Z0-9_]+):/gm)].map((m) => m[1]);
+  assert.deepEqual(actual, names);
+  assert.doesNotMatch(caller, /secrets:\s*inherit/);
+});
