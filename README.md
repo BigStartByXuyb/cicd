@@ -2,10 +2,12 @@
 
 This repository hosts reusable GitHub Actions workflows for multiple projects.
 
-The reusable workflow is intended to be consumed by repositories in the same
-GitHub Organization. Organization-level Actions Secrets are allow-listed to
-each caller repository and passed explicitly through `workflow_call`; secret
-values never live in this repository or in a caller repository.
+The reusable workflow supports two deployment modes. For the current personal
+account pilot, the caller repository stores five repository-level Actions
+Secrets and passes them explicitly through `workflow_call`. For team use,
+both repositories can later move into one GitHub Organization and the same
+names can be supplied as allow-listed Organization Secrets. Secret values
+never live in this repository.
 
 ## Layout
 
@@ -40,9 +42,10 @@ FEISHU_DEFAULT_CHAT_ID
 FEISHU_RECIPIENT_MAP_JSON
 ```
 
-The old personal-repository Environment `plugin-cicd-prod` is not a runtime
-source for a reusable workflow called by another repository. It may be kept
-temporarily during migration, but it must not be treated as the shared team
-configuration.
+For the personal pilot, configure the five names in the caller repository
+(`BigStartByXuyb/test`) under Settings → Secrets and variables → Actions →
+Repository secrets. The old Environment `plugin-cicd-prod` in `cicd` is not a
+runtime source for a reusable workflow called by another repository. It may
+be kept temporarily, but it must not be treated as the caller's configuration.
 
 Plugin source code stays in the marketplace repository. This repository only checks out the caller repository temporarily during a run; it does not store submitted plugins.

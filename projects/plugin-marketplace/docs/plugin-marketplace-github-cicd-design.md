@@ -19,7 +19,7 @@ Pull Request 触发
 
 ## 2. GitHub 文件和职责
 
-公共 CI 仓库固定为团队 GitHub Organization 下的 `cicd`，发布可复用 workflow：
+当前个人账号试运行使用 `BigStartByXuyb/cicd`；团队化后将其转移到 GitHub Organization 下的 `cicd`，发布可复用 workflow：
 
 ```text
 <ORG_SLUG>/cicd/.github/workflows/plugin-marketplace.yml@<REVIEWED_COMMIT_SHA>
@@ -27,8 +27,7 @@ Pull Request 触发
 
 marketplace 仓库只保留一个薄调用文件 `.github/workflows/plugin-cicd.yml`，不再复制完整 CI 脚本。
 
-调用方和 `cicd` 必须属于同一个 GitHub Organization。调用方只显式传递下面五个
-Organization Secrets；禁止使用 `secrets: inherit`，也禁止把 Secret 值写入仓库：
+调用方只显式传递下面五个 Secret；禁止使用 `secrets: inherit`，也禁止把 Secret 值写入仓库：
 
 ```yaml
 secrets:
@@ -38,6 +37,11 @@ secrets:
   FEISHU_DEFAULT_CHAT_ID: ${{ secrets.FEISHU_DEFAULT_CHAT_ID }}
   FEISHU_RECIPIENT_MAP_JSON: ${{ secrets.FEISHU_RECIPIENT_MAP_JSON }}
 ```
+
+当前个人账号试运行时，这五项配置在调用方仓库
+`BigStartByXuyb/test` 的 Repository secrets 中即可。团队化时，再把两个仓库
+转移到同一个 Organization，并将相同名称改为按仓库 allow-list 授权的
+Organization Secrets；调用 workflow 和传参格式保持不变。
 
 新增或维护以下文件：
 
@@ -254,8 +258,9 @@ GitHub 用户名到飞书 `open_id` 的映射放在 Organization Secret
 
 ### 8.3 飞书身份和 Secret
 
-通过飞书自建应用机器人发送消息。以下凭据统一放在 GitHub Organization Actions Secrets
-中，并通过 Organization 的 Repository access policy allow-list 只授权给启用该流水线的插件仓库，而不是普通仓库文件或普通变量：
+通过飞书自建应用机器人发送消息。个人试运行时，以下凭据放在调用方仓库的
+Repository Actions Secrets；团队化后迁移为 Organization Actions Secrets，并通过
+Organization 的 Repository access policy allow-list 只授权给启用该流水线的插件仓库：
 
 | Secret | 作用 |
 | --- | --- |
