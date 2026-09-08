@@ -47,6 +47,28 @@ test('builds a BLOCK notification when semantic audit fails', () => {
   assert.match(message.markdown, /阻断问题：1/);
 });
 
+test('uses the aggregated final decision and finding counts', () => {
+  const message = buildFeishuNotification({
+    repository: 'BigStartByXuyb/Plugins',
+    pullRequestNumber: 46,
+    pullRequestTitle: 'Reviewable plugin update',
+    commitSha: '1234567890ab',
+    authorLogin: 'alice',
+    changedPlugins: ['example-plugin'],
+    deterministicResult: 'success',
+    semanticResult: 'success',
+    auditResult: 'REVIEW',
+    finalDecision: 'REVIEW',
+    blockingFindings: 0,
+    reviewFindings: 2,
+    reportUrl: 'https://github.com/BigStartByXuyb/Plugins/actions/runs/4',
+  });
+
+  assert.equal(message.status, 'REVIEW');
+  assert.match(message.markdown, /最终结论：REVIEW/);
+  assert.match(message.markdown, /普通建议：2/);
+});
+
 test('reports failed validation and does not pretend Claude ran', () => {
   const message = buildFeishuNotification({
     repository: 'BigStartByXuyb/Plugins',

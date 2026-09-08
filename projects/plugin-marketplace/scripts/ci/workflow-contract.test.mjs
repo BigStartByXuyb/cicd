@@ -18,6 +18,16 @@ test('semantic audit permits the configured DeepSeek model alias', () => {
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
 });
 
+test('workflow publishes one structured final report for every outcome', () => {
+  assert.match(central, /final-report:/);
+  assert.match(central, /plugin-deterministic-report-\$\{\{ github\.run_id \}\}/);
+  assert.match(central, /plugin-final-report-\$\{\{ github\.run_id \}\}/);
+  assert.match(central, /GITHUB_STEP_SUMMARY/);
+  assert.match(central, /BLOCKING_FINDINGS:/);
+  assert.match(central, /REVIEW_FINDINGS:/);
+  assert.doesNotMatch(central, /blockingFindings:0,reviewFindings:0/);
+});
+
 test('caller passes exactly the required secret names', () => {
   const block = caller.match(/\n\s+secrets:\n([\s\S]*?)(?=\n\S|$)/)?.[1] ?? '';
   const actual = [...block.matchAll(/^\s{6}([A-Z0-9_]+):/gm)].map((m) => m[1]);

@@ -49,7 +49,9 @@ Organization Secrets；调用 workflow 和传参格式保持不变。
 - `projects/plugin-marketplace/scripts/ci/collect-changed-plugins.mjs`：识别提交中受影响的插件。
 - `projects/plugin-marketplace/scripts/ci/validate-marketplace.mjs`：目录、manifest、引用和版本检查。
 - `projects/plugin-marketplace/scripts/ci/build-plugin-audit-bundle.mjs`：构造 Claude 的完整审计输入。
-- `projects/plugin-marketplace/scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告。
+- `projects/plugin-marketplace/scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告，并输出结构化语义报告。
+- `projects/plugin-marketplace/scripts/ci/build-deterministic-report.mjs`：将结构检查结果转换为 JSON/Markdown 报告。
+- `projects/plugin-marketplace/scripts/ci/build-final-report.mjs`：汇总结构检查和语义审计为唯一最终报告。
 - `projects/plugin-marketplace/scripts/ci/post-github-pr-comment.mjs`：创建或更新 PR 评论。
 - `projects/plugin-marketplace/scripts/ci/notify-feishu.mjs`：汇总 CI 状态并向飞书收件人发送通知。
 
@@ -62,9 +64,11 @@ deterministic-validation
         |
         +--> semantic-audit
                     |
-                    +--> publish-pr-report
+                    +--> final-report
+                              |
+                              +--> publish-pr-report
 
-deterministic-validation + semantic-audit + publish-pr-report
+deterministic-validation + semantic-audit + final-report + publish-pr-report
         |
         +--> notify-feishu       # if: always()
 
@@ -77,7 +81,8 @@ deterministic-validation + semantic-audit
 
 - `semantic-audit` 必须声明 `needs: deterministic-validation`。
 - 结构检查失败时，Claude job 不得运行。
-- `publish-pr-report` 和 `notify-feishu` 使用 `if: ${{ always() }}`，确保前置 job 成功、失败或跳过时都能执行收尾逻辑。
+- `final-report`、`publish-pr-report` 和 `notify-feishu` 使用 `if: ${{ always() }}`，确保前置 job 成功、失败或跳过时都能执行收尾逻辑。
+- 每个阶段都上传机器可读 JSON 和人类可读 Markdown；`final-report` 将同一份最终结果写入 Artifact、GitHub Actions Job Summary、PR 评论和飞书摘要。
 - 飞书通知失败不能掩盖原始 CI 结果，但必须在 GitHub Summary 和 PR 评论中标记“通知失败”。
 
 ## 4. 触发规则
@@ -129,7 +134,7 @@ job 名称：`deterministic-validation`。
    - Token、私钥、凭据和机器专属路径是否进入仓库；
    - 空引用、不可达文件和明显错误的兼容入口。
 
-5. 生成确定性 JSON 报告和 changed-plugin manifest。
+5. 生成 `deterministic-report.json`、`deterministic-report.md` 和 changed-plugin manifest。
 6. 发现嵌套 `SKILL.md` 时报告 `UNEXPECTED_SKILL_FILE`，列出完整路径并要求维护者确认；不自动移动、重命名或注册该文件。
 7. 任何确定性检查失败时停止后续 Claude 审计，并由 `publish-pr-report` 将失败原因写入 PR。
 
@@ -189,7 +194,7 @@ Claude 不得修改文件、执行插件代码、读取工作区外文件、访�
 
 job 名称：`publish-pr-report`。
 
-该 job 必须使用 `if: ${{ always() }}`，读取所有前置 job 的 result：
+该 job 读取 `final-report` 生成的唯一最终报告，必须使用 `if: ${{ always() }}`：
 
 - `success`：结构检查和语义审计均通过；
 - `review`：存在非阻断建议；
@@ -206,7 +211,7 @@ job 名称：`publish-pr-report`。
 <!-- /bigstart-plugin-semantic-audit -->
 ```
 
-评论内容包括：
+评论内容直接来自 `final-report.md`，包括：
 
 - 结构检查状态；
 - Claude 审计状态；
@@ -216,6 +221,12 @@ job 名称：`publish-pr-report`。
 - artifact 链接；
 - commit SHA、Claude CLI 版本和审计契约版本；
 - 飞书通知状态。
+
+最终报告同时以 `final-report.json` 和 `final-report.md` 上传为 Artifact。报告决策固定为：
+
+- `PASS`：结构检查和语义审计均通过；
+- `REVIEW`：存在需要维护者确认的非阻断问题，或语义审计被跳过；
+- `BLOCK`：结构检查失败、语义审计发现高置信度阻断问题，或报告无效。
 
 ## 8. 飞书通知设计
 
@@ -228,6 +239,7 @@ if: ${{ always() }}
 needs:
   - deterministic-validation
   - semantic-audit
+  - final-report
   - publish-pr-report
 ```
 

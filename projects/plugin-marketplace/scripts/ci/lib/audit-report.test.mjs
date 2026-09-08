@@ -46,6 +46,15 @@ test('parses a valid structured Markdown audit report', () => {
   assert.equal(result.blockingFindings, 0);
   assert.equal(result.reviewFindings, 1);
   assert.equal(result.changedPlugins[0], 'example-plugin');
+  assert.equal(result.findings[0].id, 'REVIEW-001');
+  assert.equal(result.findings[0].title, 'Duplicate responsibility');
+});
+
+test('normalizes a prose-wrapped fenced audit report', () => {
+  const wrapped = `The audit is complete.\n\n\`\`\`markdown\n${validReport}\n\`\`\``;
+  const result = parseAuditReport(wrapped);
+  assert.equal(result.result, 'REVIEW');
+  assert.match(result.markdown, /^---\n/);
 });
 
 test('rejects a BLOCK finding without high confidence', () => {

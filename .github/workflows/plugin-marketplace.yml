@@ -93,7 +93,31 @@ jobs:
 
       - name: Validate structure and configuration
         working-directory: marketplace
-        run: node "$CI_PROJECT_DIR/scripts/ci/validate-marketplace.mjs" --root "${{ steps.root.outputs.root }}"
+        run: node "$CI_PROJECT_DIR/scripts/ci/validate-marketplace.mjs" --root "${{ steps.root.outputs.root }}" > "$RUNNER_TEMP/deterministic-validation.json"
+
+      - name: Build deterministic report
+        if: ${{ always() }}
+        env:
+          PLUGINS_JSON: ${{ steps.changed-plugins.outputs.plugins || '[]' }}
+        run: |
+          if [ ! -f "$RUNNER_TEMP/deterministic-validation.json" ]; then
+            printf '{"valid":false,"errors":["validation did not produce a result"],"plugins":[]}' > "$RUNNER_TEMP/deterministic-validation.json"
+          fi
+          node "$CI_PROJECT_DIR/scripts/ci/build-deterministic-report.mjs" \
+            --input "$RUNNER_TEMP/deterministic-validation.json" \
+            --plugins-json "$PLUGINS_JSON" \
+            --output-json "$RUNNER_TEMP/deterministic-report.json" \
+            --output-markdown "$RUNNER_TEMP/deterministic-report.md"
+
+      - name: Upload deterministic report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-deterministic-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/deterministic-validation.json
+            ${{ runner.temp }}/deterministic-report.json
+            ${{ runner.temp }}/deterministic-report.md
 
   semantic-audit:
     needs: deterministic-validation
@@ -163,22 +187,108 @@ jobs:
 
       - name: Parse audit report
         id: parse-report
+        if: ${{ always() }}
         env:
           REPORT: ${{ runner.temp }}/audit-report.md
         run: |
-          node "$CI_PROJECT_DIR/scripts/ci/parse-plugin-audit-report.mjs" --input "$RUNNER_TEMP/audit-report.md"
-          result=$(node --input-type=module -e "import fs from 'node:fs'; const text=fs.readFileSync(process.env.REPORT,'utf8'); const line=text.split(/\\r?\\n/).find(x=>x.startsWith('result:')); console.log(line?.slice('result:'.length).trim() ?? 'INVALID')")
+          set +e
+          node "$CI_PROJECT_DIR/scripts/ci/parse-plugin-audit-report.mjs" \
+            --input "$RUNNER_TEMP/audit-report.md" \
+            --output-json "$RUNNER_TEMP/semantic-report.json" \
+            --output-markdown "$RUNNER_TEMP/semantic-report.md"
+          parse_exit=$?
+          result=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')); console.log(data.result ?? 'INVALID')")
+          blocking=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')); console.log(data.blockingFindings ?? 0)")
+          review=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')); console.log(data.reviewFindings ?? 0)")
           echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "blocking_findings=$blocking" >> "$GITHUB_OUTPUT"
+          echo "review_findings=$review" >> "$GITHUB_OUTPUT"
+          exit $parse_exit
 
       - name: Upload audit report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: plugin-semantic-audit-${{ github.run_id }}
-          path: ${{ runner.temp }}/audit-report.md
+          path: |
+            ${{ runner.temp }}/audit-report.md
+            ${{ runner.temp }}/semantic-report.json
+            ${{ runner.temp }}/semantic-report.md
+
+  final-report:
+    needs: [deterministic-validation, semantic-audit]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    outputs:
+      decision: ${{ steps.aggregate.outputs.decision }}
+      blocking_findings: ${{ steps.aggregate.outputs.blocking_findings }}
+      review_findings: ${{ steps.aggregate.outputs.review_findings }}
+    steps:
+      - name: Checkout CI implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cicd
+          ref: ${{ inputs.ci_ref }}
+          path: ci
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download deterministic report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-deterministic-report-*
+          path: ${{ runner.temp }}/deterministic-report
+          merge-multiple: true
+
+      - name: Download semantic report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-semantic-audit-*
+          path: ${{ runner.temp }}/semantic-report
+          merge-multiple: true
+
+      - name: Build final report
+        id: aggregate
+        env:
+          PLUGINS_JSON: ${{ needs.deterministic-validation.outputs.plugins || '[]' }}
+          REPORT: ${{ runner.temp }}/final-report.json
+        run: |
+          find_file() { find "$1" -maxdepth 2 -type f -name "$2" -print -quit 2>/dev/null || true; }
+          deterministic=$(find_file "$RUNNER_TEMP/deterministic-report" deterministic-report.json)
+          semantic=$(find_file "$RUNNER_TEMP/semantic-report" semantic-report.json)
+          semantic_markdown=$(find_file "$RUNNER_TEMP/semantic-report" semantic-report.md)
+          args=(--plugins-json "$PLUGINS_JSON" --output-json "$RUNNER_TEMP/final-report.json" --output-markdown "$RUNNER_TEMP/final-report.md")
+          if [ -n "$deterministic" ]; then args+=(--deterministic "$deterministic"); fi
+          if [ -n "$semantic" ]; then args+=(--semantic "$semantic"); fi
+          if [ -n "$semantic_markdown" ]; then args+=(--semantic-markdown "$semantic_markdown"); fi
+          node "$CI_PROJECT_DIR/scripts/ci/build-final-report.mjs" "${args[@]}"
+          decision=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')).decision)" )
+          blocking=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')).checks.semantic.blockingFindings)" )
+          review=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')).checks.semantic.reviewFindings)" )
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
+          echo "blocking_findings=$blocking" >> "$GITHUB_OUTPUT"
+          echo "review_findings=$review" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/final-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload final report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-final-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/final-report.json
+            ${{ runner.temp }}/final-report.md
 
   publish-pr-report:
-    needs: [deterministic-validation, semantic-audit]
+    needs: final-report
     if: ${{ always() && github.event_name == 'pull_request_target' }}
     runs-on: ubuntu-latest
     steps:
@@ -195,23 +305,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Download semantic report when available
-        if: ${{ needs.semantic-audit.result == 'success' }}
+      - name: Download final report
+        if: ${{ always() }}
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          pattern: plugin-semantic-audit-*
-          path: ${{ runner.temp }}/semantic-report
+          pattern: plugin-final-report-*
+          path: ${{ runner.temp }}/final-report
           merge-multiple: true
 
       - name: Build PR comment input
         env:
-          DETERMINISTIC_RESULT: ${{ needs.deterministic-validation.result }}
-          SEMANTIC_RESULT: ${{ needs.semantic-audit.result }}
-          AUDIT_RESULT: ${{ needs.semantic-audit.outputs.audit_result }}
-          REPORT_DIR: ${{ runner.temp }}/semantic-report
+          REPORT_DIR: ${{ runner.temp }}/final-report
           INPUT_PATH: ${{ runner.temp }}/pr-comment.json
         run: |
-          node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const report=fs.existsSync(process.env.REPORT_DIR) ? fs.readdirSync(process.env.REPORT_DIR).map(f=>path.join(process.env.REPORT_DIR,f)).find(f=>f.endsWith('.md')) : null; const markdown=report ? fs.readFileSync(report,'utf8') : ('# Plugin Semantic Audit\\n\\n- 结构检查：'+process.env.DETERMINISTIC_RESULT+'\\n- Claude 审计：'+process.env.SEMANTIC_RESULT); fs.writeFileSync(process.env.INPUT_PATH, JSON.stringify({markdown}));"
+          node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const report=fs.existsSync(process.env.REPORT_DIR) ? fs.readdirSync(process.env.REPORT_DIR).map(f=>path.join(process.env.REPORT_DIR,f)).find(f=>f.endsWith('.md')) : null; const markdown=report ? fs.readFileSync(report,'utf8') : '# Plugin CI/CD Report\\n\\n- 最终报告未生成'; fs.writeFileSync(process.env.INPUT_PATH, JSON.stringify({markdown}));"
 
       - name: Create or update PR comment
         env:
@@ -220,7 +328,7 @@ jobs:
         run: node "$CI_PROJECT_DIR/scripts/ci/post-github-pr-comment.mjs" --input "$RUNNER_TEMP/pr-comment.json"
 
   notify-feishu:
-    needs: [deterministic-validation, semantic-audit, publish-pr-report]
+    needs: [deterministic-validation, semantic-audit, final-report, publish-pr-report]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -243,9 +351,12 @@ jobs:
           DETERMINISTIC_RESULT: ${{ needs.deterministic-validation.result }}
           SEMANTIC_RESULT: ${{ needs.semantic-audit.result }}
           AUDIT_RESULT: ${{ needs.semantic-audit.outputs.audit_result }}
+          FINAL_DECISION: ${{ needs.final-report.outputs.decision }}
+          BLOCKING_FINDINGS: ${{ needs.final-report.outputs.blocking_findings || '0' }}
+          REVIEW_FINDINGS: ${{ needs.final-report.outputs.review_findings || '0' }}
           PLUGINS_JSON: ${{ needs.deterministic-validation.outputs.plugins || '[]' }}
         run: |
-          node --input-type=module -e "import fs from 'node:fs'; const e=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')); const pr=e.pull_request; const reviewers=(pr?.requested_reviewers ?? []).map(u=>u.login).filter(Boolean); const input={repository:process.env.GITHUB_REPOSITORY,pullRequestNumber:pr?.number ?? 0,pullRequestTitle:pr?.title ?? 'Default branch pipeline',commitSha:process.env.GITHUB_SHA,authorLogin:pr?.user?.login ?? 'unknown',reviewerLogins:reviewers,changedPlugins:JSON.parse(process.env.PLUGINS_JSON),deterministicResult:process.env.DETERMINISTIC_RESULT,semanticResult:process.env.SEMANTIC_RESULT,auditResult:process.env.AUDIT_RESULT || null,blockingFindings:0,reviewFindings:0,reportUrl:process.env.GITHUB_SERVER_URL+'/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID}; fs.writeFileSync(process.env.INPUT_PATH,JSON.stringify(input));"
+          node --input-type=module -e "import fs from 'node:fs'; const e=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')); const pr=e.pull_request; const reviewers=(pr?.requested_reviewers ?? []).map(u=>u.login).filter(Boolean); const input={repository:process.env.GITHUB_REPOSITORY,pullRequestNumber:pr?.number ?? 0,pullRequestTitle:pr?.title ?? 'Default branch pipeline',commitSha:process.env.GITHUB_SHA,authorLogin:pr?.user?.login ?? 'unknown',reviewerLogins:reviewers,changedPlugins:JSON.parse(process.env.PLUGINS_JSON),deterministicResult:process.env.DETERMINISTIC_RESULT,semanticResult:process.env.SEMANTIC_RESULT,auditResult:process.env.AUDIT_RESULT || null,finalDecision:process.env.FINAL_DECISION || 'UNKNOWN',blockingFindings:Number(process.env.BLOCKING_FINDINGS || 0),reviewFindings:Number(process.env.REVIEW_FINDINGS || 0),reportUrl:process.env.GITHUB_SERVER_URL+'/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID}; fs.writeFileSync(process.env.INPUT_PATH,JSON.stringify(input));"
 
       - name: Send Feishu notification
         env:
