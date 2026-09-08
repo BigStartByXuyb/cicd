@@ -17,7 +17,7 @@ shared/                             # future cross-project utilities
 The marketplace repository calls:
 
 ```text
-BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@v2
+BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@v2.1
 ```
 
 Plugin source code stays in the marketplace repository. This repository only checks out the caller repository temporarily during a run; it does not store submitted plugins.

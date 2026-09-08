@@ -22,7 +22,7 @@ Pull Request 触发
 公共 CI 仓库固定为 `BigStartByXuyb/cicd`，发布可复用 workflow：
 
 ```text
-BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@v2
+BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@v2.1
 ```
 
 marketplace 仓库只保留一个薄调用文件 `.github/workflows/plugin-cicd.yml`，不再复制完整 CI 脚本。

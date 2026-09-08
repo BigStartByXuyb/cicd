@@ -20,7 +20,6 @@ concurrency:
 
 env:
   MARKETPLACE_DIR: ${{ github.workspace }}/marketplace
-  CI_DIR: ${{ github.workspace }}/ci
   CI_PROJECT_DIR: ${{ github.workspace }}/ci/projects/plugin-marketplace
 
 jobs:
