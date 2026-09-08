@@ -1,0 +1,15 @@
+{
+  "repository": "BigStartByXuyb/Plugins",
+  "pullRequestNumber": 999,
+  "pullRequestTitle": "CI dry-run example",
+  "commitSha": "0123456789abcdef",
+  "authorLogin": "alice",
+  "reviewerLogins": ["bob"],
+  "changedPlugins": ["example-plugin"],
+  "deterministicResult": "success",
+  "semanticResult": "success",
+  "auditResult": "REVIEW",
+  "blockingFindings": 0,
+  "reviewFindings": 1,
+  "reportUrl": "https://github.com/BigStartByXuyb/Plugins/pull/999"
+}
