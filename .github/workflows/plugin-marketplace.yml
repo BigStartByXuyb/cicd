@@ -7,7 +7,7 @@ on:
         description: 'Version tag or commit of this reusable workflow repository'
         required: false
         type: string
-        default: v1
+        default: v2
 
 permissions:
   contents: read
@@ -21,6 +21,7 @@ concurrency:
 env:
   MARKETPLACE_DIR: ${{ github.workspace }}/marketplace
   CI_DIR: ${{ github.workspace }}/ci
+  CI_PROJECT_DIR: ${{ github.workspace }}/ci/projects/plugin-marketplace
 
 jobs:
   deterministic-validation:
@@ -77,12 +78,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         working-directory: marketplace
         run: |
-          plugins=$(node ../ci/scripts/ci/collect-changed-plugins.mjs)
+          plugins=$(node "$CI_PROJECT_DIR/scripts/ci/collect-changed-plugins.mjs")
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
 
       - name: Validate structure and configuration
         working-directory: marketplace
-        run: node ../ci/scripts/ci/validate-marketplace.mjs --root "${{ steps.root.outputs.root }}"
+        run: node "$CI_PROJECT_DIR/scripts/ci/validate-marketplace.mjs" --root "${{ steps.root.outputs.root }}"
 
   semantic-audit:
     needs: deterministic-validation
@@ -135,9 +136,9 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then ROOT="$RUNNER_TEMP/pr-tree"; else ROOT="$MARKETPLACE_DIR"; fi
           plugin_args=()
           while IFS= read -r plugin; do plugin_args+=(--plugin "$plugin"); done < <(node -e "for (const p of JSON.parse(process.env.PLUGINS_JSON)) console.log(p)")
-          node ci/scripts/ci/build-plugin-audit-bundle.mjs \
+          node "$CI_PROJECT_DIR/scripts/ci/build-plugin-audit-bundle.mjs" \
             --root "$ROOT" \
-            --contract-root "$CI_DIR" \
+            --contract-root "$CI_PROJECT_DIR" \
             --output "$RUNNER_TEMP/audit-bundle.md" \
             "${plugin_args[@]}"
 
@@ -148,14 +149,14 @@ jobs:
         run: |
           claude --bare --no-session-persistence --permission-prompts none --output-format text \
             --model deepseek-v4-flash \
-            -p "$(cat ci/docs/plugin-semantic-audit.md)" < "$RUNNER_TEMP/audit-bundle.md" > "$RUNNER_TEMP/audit-report.md"
+            -p "$(cat "$CI_PROJECT_DIR/docs/plugin-semantic-audit.md")" < "$RUNNER_TEMP/audit-bundle.md" > "$RUNNER_TEMP/audit-report.md"
 
       - name: Parse audit report
         id: parse-report
         env:
           REPORT: ${{ runner.temp }}/audit-report.md
         run: |
-          node ci/scripts/ci/parse-plugin-audit-report.mjs --input "$RUNNER_TEMP/audit-report.md"
+          node "$CI_PROJECT_DIR/scripts/ci/parse-plugin-audit-report.mjs" --input "$RUNNER_TEMP/audit-report.md"
           result=$(node --input-type=module -e "import fs from 'node:fs'; const text=fs.readFileSync(process.env.REPORT,'utf8'); const line=text.split(/\\r?\\n/).find(x=>x.startsWith('result:')); console.log(line?.slice('result:'.length).trim() ?? 'INVALID')")
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
@@ -206,7 +207,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: node ci/scripts/ci/post-github-pr-comment.mjs --input "$RUNNER_TEMP/pr-comment.json"
+        run: node "$CI_PROJECT_DIR/scripts/ci/post-github-pr-comment.mjs" --input "$RUNNER_TEMP/pr-comment.json"
 
   notify-feishu:
     needs: [deterministic-validation, semantic-audit, publish-pr-report]
@@ -243,4 +244,4 @@ jobs:
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           FEISHU_DEFAULT_CHAT_ID: ${{ secrets.FEISHU_DEFAULT_CHAT_ID }}
           FEISHU_RECIPIENT_MAP_JSON: ${{ secrets.FEISHU_RECIPIENT_MAP_JSON }}
-        run: node ci/scripts/ci/notify-feishu.mjs --input "$RUNNER_TEMP/feishu-input.json"
+        run: node "$CI_PROJECT_DIR/scripts/ci/notify-feishu.mjs" --input "$RUNNER_TEMP/feishu-input.json"

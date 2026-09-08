@@ -22,7 +22,7 @@ Pull Request 触发
 公共 CI 仓库固定为 `BigStartByXuyb/cicd`，发布可复用 workflow：
 
 ```text
-BigStartByXuyb/cicd/.github/workflows/reusable-plugin-cicd.yml@v1
+BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@v2
 ```
 
 marketplace 仓库只保留一个薄调用文件 `.github/workflows/plugin-cicd.yml`，不再复制完整 CI 脚本。
@@ -30,12 +30,12 @@ marketplace 仓库只保留一个薄调用文件 `.github/workflows/plugin-cicd.
 新增或维护以下文件：
 
 - `.github/workflows/plugin-cicd.yml`：主工作流。
-- `scripts/ci/collect-changed-plugins.mjs`：识别提交中受影响的插件。
-- `scripts/ci/validate-marketplace.mjs`：目录、manifest、引用和版本检查。
-- `scripts/ci/build-plugin-audit-bundle.mjs`：构造 Claude 的完整审计输入。
-- `scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告。
-- `scripts/ci/post-github-pr-comment.mjs`：创建或更新 PR 评论。
-- `scripts/ci/notify-feishu.mjs`：汇总 CI 状态并向飞书收件人发送通知。
+- `projects/plugin-marketplace/scripts/ci/collect-changed-plugins.mjs`：识别提交中受影响的插件。
+- `projects/plugin-marketplace/scripts/ci/validate-marketplace.mjs`：目录、manifest、引用和版本检查。
+- `projects/plugin-marketplace/scripts/ci/build-plugin-audit-bundle.mjs`：构造 Claude 的完整审计输入。
+- `projects/plugin-marketplace/scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告。
+- `projects/plugin-marketplace/scripts/ci/post-github-pr-comment.mjs`：创建或更新 PR 评论。
+- `projects/plugin-marketplace/scripts/ci/notify-feishu.mjs`：汇总 CI 状态并向飞书收件人发送通知。
 
 ## 3. 工作流结构
 
