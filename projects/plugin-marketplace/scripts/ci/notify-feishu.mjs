@@ -6,7 +6,15 @@ if (!inputPath) throw new Error('--input is required');
 
 const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
 let recipientMap = {};
-if (process.env.FEISHU_RECIPIENT_MAP_JSON) recipientMap = JSON.parse(process.env.FEISHU_RECIPIENT_MAP_JSON);
+if (process.env.FEISHU_RECIPIENT_MAP_JSON) {
+  try {
+    const parsed = JSON.parse(process.env.FEISHU_RECIPIENT_MAP_JSON);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('recipient map must be a JSON object');
+    recipientMap = parsed;
+  } catch {
+    console.warn('FEISHU_RECIPIENT_MAP_JSON is invalid JSON; using the default chat only');
+  }
+}
 const unresolvedReviewerLogins = (input.reviewerLogins ?? []).filter((login) => !recipientMap[login]);
 const notification = buildFeishuNotification({ ...input, unresolvedReviewerLogins });
 if (process.argv.includes('--dry-run')) {

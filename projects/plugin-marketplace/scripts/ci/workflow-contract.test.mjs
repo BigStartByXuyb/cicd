@@ -14,6 +14,10 @@ test('central workflow declares every required workflow-call secret', () => {
   assert.doesNotMatch(central, /environment:\s*plugin-cicd-prod/);
 });
 
+test('semantic audit permits the configured DeepSeek model alias', () => {
+  assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
+});
+
 test('caller passes exactly the required secret names', () => {
   const block = caller.match(/\n\s+secrets:\n([\s\S]*?)(?=\n\S|$)/)?.[1] ?? '';
   const actual = [...block.matchAll(/^\s{6}([A-Z0-9_]+):/gm)].map((m) => m[1]);
