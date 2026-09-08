@@ -24,7 +24,7 @@ shared/                             # future cross-project utilities
 The marketplace repository currently calls:
 
 ```text
-BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@392dcb1edf474392221f04fd88e47a64af80576b
+BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@d71a86e97e737f8bb48fc4f999cf1e52820bc598
 ```
 
 After the repositories are transferred to the team Organization, replace the
