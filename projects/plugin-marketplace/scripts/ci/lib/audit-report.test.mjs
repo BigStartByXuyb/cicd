@@ -57,6 +57,23 @@ test('normalizes a prose-wrapped fenced audit report', () => {
   assert.match(result.markdown, /^---\n/);
 });
 
+test('parses the Chinese version 2 report contract', () => {
+  const report = validReport
+    .replace('audit_version: 1', 'audit_version: 2')
+    .replace('# Plugin Semantic Audit', '# 插件语义审计')
+    .replace('## Summary', '## 摘要')
+    .replace('## Findings', '## 问题')
+    .replace('## Non-blocking observations', '## 非阻断观察')
+    .replace('## Audit limitations', '## 审计限制')
+    .replace('- Severity:', '- 严重级别:')
+    .replace('- Category:', '- 类别:')
+    .replace('- Confidence:', '- 置信度:')
+    .replace('- Scope:', '- 范围:');
+  const result = parseAuditReport(report);
+  assert.equal(result.result, 'REVIEW');
+  assert.equal(result.findings[0].category, 'DUPLICATE_RESPONSIBILITY');
+});
+
 test('rejects a BLOCK finding without high confidence', () => {
   const report = validReport
     .replace('result: REVIEW', 'result: BLOCK')

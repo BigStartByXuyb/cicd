@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This document is the repository contract for the future CI semantic-audit job. It defines the fixed Claude Code prompt, the evidence boundary, the finding taxonomy, and the Markdown report format. The audit is advisory for wording and simplification issues, but can block a pull request when it finds a high-confidence structural or semantic defect.
+This document is the repository contract for the CI semantic-audit job. It defines the fixed Claude Code prompt, the evidence boundary, the finding taxonomy, and the Markdown report format. The audit is advisory for wording and simplification issues, but can block a pull request when it finds a high-confidence structural or semantic defect.
+
+The current report contract is version 2. All human-readable report prose must be written in Simplified Chinese (`zh-CN`). Machine-readable front-matter keys, enum values, finding IDs, category names, severity names, confidence values, repository paths, code identifiers, and Markdown field labels defined below remain exact ASCII tokens so the CI parser can consume the report deterministically.
 
 The existing deterministic validation remains authoritative for manifest syntax, directory layout, and required files. Claude is used for cross-file meaning and responsibility analysis; it must not replace deterministic validation.
 
@@ -48,6 +50,8 @@ Use repository evidence, not semantic guesswork. Every finding must cite one or 
 Blocking is allowed only for a high-confidence contradiction, an ambiguous public routing/entry-point contract that can cause the wrong component to run, or a compatibility path proven to have no consumer. Redundancy, unclear wording, and simplification opportunities are REVIEW findings unless they create one of those blocking conditions.
 
 Do not propose edits outside the changed plugin, marketplace manifest, or the audit policy. Do not modify files. Return exactly one report in the Markdown format defined below and no introductory or trailing prose.
+
+Language requirement: write the summary, finding titles, explanations, suggested resolutions, non-blocking observations, audit limitations, and all other human-readable prose in Simplified Chinese. Do not write an English translation beside the Chinese text. Keep only the fixed machine-readable tokens and field labels in their exact form.
 ```
 
 ## Finding taxonomy and severity
@@ -77,7 +81,7 @@ Claude must return exactly one report with this front matter and section order:
 
 ```markdown
 ---
-audit_version: 1
+audit_version: 2
 result: PASS | REVIEW | BLOCK
 blocking_findings: 0
 review_findings: 0
@@ -85,16 +89,16 @@ changed_plugins:
   - plugin-name
 ---
 
-# Plugin Semantic Audit
+# 插件语义审计
 
-## Summary
+## 摘要
 
-One sentence describing the reviewed scope and the result.
+使用简体中文写一句话描述审查范围和结果。
 
-## Findings
+## 问题
 
 <!-- Repeat this block once per finding, ordered BLOCK before REVIEW. -->
-### [BLOCK-001] Short evidence-based title
+### [BLOCK-001] 简短且有证据依据的问题标题
 
 - Severity: `BLOCK`
 - Category: `CONTRADICTION`
@@ -103,19 +107,19 @@ One sentence describing the reviewed scope and the result.
 - Evidence:
   - `plugins/example/skills/a/SKILL.md:42`
   - `plugins/example/skills/b/SKILL.md:18`
-- Why it matters: Explain the incompatible behavior or routing consequence.
-- Suggested resolution: State the smallest change that would remove the finding; do not apply it.
+- Why it matters: 使用简体中文解释冲突行为或路由后果。
+- Suggested resolution: 使用简体中文说明能够消除问题的最小改动，但不要实际修改文件。
 
-## Non-blocking observations
+## 非阻断观察
 
-List only REVIEW findings not already listed above. If there are none, write `None`.
+只列出上面没有重复列出的 REVIEW 问题。没有时写 `None`。
 
-## Audit limitations
+## 审计限制
 
-List missing context, unresolved references, or uncertain conclusions. If none, write `None`.
+使用简体中文列出缺失上下文、未解析引用或不确定结论。没有时写 `None`。
 ```
 
-The parser must verify the front matter, result enum, counts, changed plugin list, heading order, finding IDs, severity/category enums, and evidence paths. It must fail closed when the report is malformed, missing evidence, or contains a `BLOCK` finding whose confidence is not `high`.
+The parser must verify the front matter, result enum, counts, changed plugin list, heading order, finding IDs, severity/category enums, and evidence paths. Version 2 reports must use the Chinese headings above and Chinese human-readable prose. Version 1 reports remain readable for historical artifacts. The parser must fail closed when the report is malformed, missing evidence, or contains a `BLOCK` finding whose confidence is not `high`.
 
 ## CI interpretation
 

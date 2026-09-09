@@ -18,6 +18,14 @@ test('semantic audit permits the configured DeepSeek model alias', () => {
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
 });
 
+test('semantic audit contract requires Simplified Chinese version 2 reports', () => {
+  const contract = fs.readFileSync(path.resolve(process.cwd(), 'projects/plugin-marketplace/docs/plugin-semantic-audit.md'), 'utf8');
+  assert.match(contract, /audit_version: 2/);
+  assert.match(contract, /Simplified Chinese/);
+  assert.match(contract, /# 插件语义审计/);
+  assert.match(contract, /## 摘要/);
+});
+
 test('workflow publishes one structured final report for every outcome', () => {
   assert.match(central, /final-report:/);
   assert.match(central, /plugin-deterministic-report-\$\{\{ github\.run_id \}\}/);

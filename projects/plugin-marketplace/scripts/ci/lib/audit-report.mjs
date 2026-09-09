@@ -1,5 +1,6 @@
 const RESULTS = new Set(['PASS', 'REVIEW', 'BLOCK', 'INVALID']);
 const SEVERITIES = new Set(['BLOCK', 'REVIEW']);
+const AUDIT_VERSIONS = new Set(['1', '2']);
 
 export function normalizeAuditMarkdown(markdown) {
   const source = String(markdown ?? '').replace(/^\uFEFF/, '').trim();
@@ -51,12 +52,16 @@ export function parseAuditReport(markdown) {
   const frontMatter = parseFrontMatter(normalizedMarkdown);
   const result = frontMatter.result;
   if (!RESULTS.has(result)) throw new Error('result must be PASS, REVIEW, BLOCK, or INVALID');
-  if (String(frontMatter.audit_version) !== '1') throw new Error('unsupported audit_version');
+  const auditVersion = String(frontMatter.audit_version);
+  if (!AUDIT_VERSIONS.has(auditVersion)) throw new Error('unsupported audit_version');
+  const requiredSections = auditVersion === '2'
+    ? ['# 插件语义审计', '## 摘要', '## 问题', '## 非阻断观察', '## 审计限制']
+    : ['# Plugin Semantic Audit', '## Summary', '## Findings', '## Non-blocking observations', '## Audit limitations'];
 
   const blockingFindings = parseInteger(frontMatter.blocking_findings, 'blocking_findings');
   const reviewFindings = parseInteger(frontMatter.review_findings, 'review_findings');
   const changedPlugins = Array.isArray(frontMatter.changed_plugins) ? frontMatter.changed_plugins : [];
-  for (const section of ['# Plugin Semantic Audit', '## Summary', '## Findings', '## Non-blocking observations', '## Audit limitations']) {
+  for (const section of requiredSections) {
     if (!normalizedMarkdown.includes(section)) throw new Error(`audit report is missing ${section}`);
   }
 
@@ -68,10 +73,10 @@ export function parseAuditReport(markdown) {
     const block = normalizedMarkdown.slice(start, end);
     const id = headings[index][1];
     const title = headings[index][2].trim();
-    const severity = block.match(/^- Severity: `([^`]+)`$/m)?.[1];
-    const category = block.match(/^- Category: `([^`]+)`$/m)?.[1] ?? null;
-    const confidence = block.match(/^- Confidence: `([^`]+)`$/m)?.[1];
-    const scope = block.match(/^- Scope: `([^`]+)`$/m)?.[1] ?? null;
+    const severity = block.match(/^- (?:Severity|严重级别): `([^`]+)`$/m)?.[1];
+    const category = block.match(/^- (?:Category|类别): `([^`]+)`$/m)?.[1] ?? null;
+    const confidence = block.match(/^- (?:Confidence|置信度): `([^`]+)`$/m)?.[1];
+    const scope = block.match(/^- (?:Scope|范围): `([^`]+)`$/m)?.[1] ?? null;
     const evidence = [...block.matchAll(/`([^`\r\n]+:\d+)`/g)].map((match) => match[1]);
     if (!SEVERITIES.has(severity)) throw new Error('finding severity is invalid');
     if (!confidence) throw new Error('finding confidence is missing');
