@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDeepSeekClaudeConfig } from './provider-config.mjs';
 
-test('uses DeepSeek Anthropic compatibility with V4 Flash by default', () => {
+test('uses a Claude Code alias mapped to DeepSeek V4 Flash by default', () => {
   assert.deepEqual(createDeepSeekClaudeConfig(), {
     baseUrl: 'https://api.deepseek.com/anthropic',
-    model: 'deepseek-v4-flash',
+    model: 'claude-sonnet-4-6',
   });
 });
 

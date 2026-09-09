@@ -16,6 +16,8 @@ test('central workflow declares every required workflow-call secret', () => {
 
 test('semantic audit permits the configured DeepSeek model alias', () => {
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
+  assert.match(central, /--model\s+claude-sonnet-4-6/);
+  assert.doesNotMatch(central, /--model\s+deepseek-v4-flash/);
 });
 
 test('semantic audit contract requires Simplified Chinese version 2 reports', () => {

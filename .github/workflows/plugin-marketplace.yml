@@ -182,7 +182,7 @@ jobs:
           CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: '1'
         run: |
           claude --bare --no-session-persistence --permission-prompts none --output-format text \
-            --model deepseek-v4-flash \
+            --model claude-sonnet-4-6 \
             -p "$(cat "$CI_PROJECT_DIR/docs/plugin-semantic-audit.md")" < "$RUNNER_TEMP/audit-bundle.md" > "$RUNNER_TEMP/audit-report.md"
 
       - name: Parse audit report
