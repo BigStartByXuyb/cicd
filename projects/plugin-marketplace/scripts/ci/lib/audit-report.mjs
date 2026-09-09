@@ -1,6 +1,7 @@
 const RESULTS = new Set(['PASS', 'REVIEW', 'BLOCK', 'INVALID']);
 const SEVERITIES = new Set(['BLOCK', 'REVIEW']);
 const AUDIT_VERSIONS = new Set(['1', '2']);
+const HAN_PATTERN = /\p{Script=Han}/u;
 
 export function normalizeAuditMarkdown(markdown) {
   const source = String(markdown ?? '').replace(/^\uFEFF/, '').trim();
@@ -64,6 +65,12 @@ export function parseAuditReport(markdown) {
   for (const section of requiredSections) {
     if (!normalizedMarkdown.includes(section)) throw new Error(`audit report is missing ${section}`);
   }
+  if (auditVersion === '2') {
+    const summaryStart = normalizedMarkdown.indexOf('## 摘要');
+    const findingsStart = normalizedMarkdown.indexOf('## 问题');
+    const summary = normalizedMarkdown.slice(summaryStart, findingsStart);
+    if (!HAN_PATTERN.test(summary)) throw new Error('version 2 summary must contain Simplified Chinese prose');
+  }
 
   const findings = [];
   const headings = [...normalizedMarkdown.matchAll(/^### \[((?:BLOCK|REVIEW)-\d+)\] (.+)$/gm)];
@@ -84,6 +91,9 @@ export function parseAuditReport(markdown) {
       throw new Error('BLOCK finding must have high confidence');
     }
     if (evidence.length === 0) throw new Error('finding must contain evidence');
+    if (auditVersion === '2' && !HAN_PATTERN.test(block)) {
+      throw new Error('version 2 finding must contain Simplified Chinese prose');
+    }
     findings.push({ id, title, severity, category, confidence, scope, evidence });
   }
 
