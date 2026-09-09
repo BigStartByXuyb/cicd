@@ -36,6 +36,12 @@ test('workflow publishes one structured final report for every outcome', () => {
   assert.doesNotMatch(central, /blockingFindings:0,reviewFindings:0/);
 });
 
+test('semantic parser reads generated JSON, not raw Markdown', () => {
+  assert.match(central, /SEMANTIC_REPORT:\s*\$\{\{ runner\.temp \}\}\/semantic-report\.json/);
+  assert.match(central, /process\.env\.SEMANTIC_REPORT/);
+  assert.doesNotMatch(central, /REPORT:\s*\$\{\{ runner\.temp \}\}\/audit-report\.md/);
+});
+
 test('caller passes exactly the required secret names', () => {
   const block = caller.match(/\n\s+secrets:\n([\s\S]*?)(?=\n\S|$)/)?.[1] ?? '';
   const actual = [...block.matchAll(/^\s{6}([A-Z0-9_]+):/gm)].map((m) => m[1]);

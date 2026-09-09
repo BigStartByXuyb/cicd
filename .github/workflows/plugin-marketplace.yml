@@ -189,7 +189,7 @@ jobs:
         id: parse-report
         if: ${{ always() }}
         env:
-          REPORT: ${{ runner.temp }}/audit-report.md
+          SEMANTIC_REPORT: ${{ runner.temp }}/semantic-report.json
         run: |
           set +e
           node "$CI_PROJECT_DIR/scripts/ci/parse-plugin-audit-report.mjs" \
@@ -197,9 +197,9 @@ jobs:
             --output-json "$RUNNER_TEMP/semantic-report.json" \
             --output-markdown "$RUNNER_TEMP/semantic-report.md"
           parse_exit=$?
-          result=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')); console.log(data.result ?? 'INVALID')")
-          blocking=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')); console.log(data.blockingFindings ?? 0)")
-          review=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')); console.log(data.reviewFindings ?? 0)")
+          result=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.result ?? 'INVALID')")
+          blocking=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.blockingFindings ?? 0)")
+          review=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.reviewFindings ?? 0)")
           echo "result=$result" >> "$GITHUB_OUTPUT"
           echo "blocking_findings=$blocking" >> "$GITHUB_OUTPUT"
           echo "review_findings=$review" >> "$GITHUB_OUTPUT"
