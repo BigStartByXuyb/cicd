@@ -152,7 +152,7 @@ job 名称：`semantic-audit`。
 - 变更插件的文件索引（路径 + 字节数）、其他插件的 `plugin.json`、marketplace 公开入口清单；
 - `docs/plugin-semantic-audit.md` 固定的审计契约和提示词（作为 trusted prompt）。
 
-插件源码不进 prompt。Claude 通过只读的 `Read` / `Grep` / `Glob` 工具，在被审计 revision 的 checkout 上按需读取需要引用的文件；审计成本因此与插件体量解耦，也不会因为插件变大而触发 CLI 的 prompt 长度上限。
+插件源码不进 prompt。Claude 通过只读的 `Read` 工具，在被审计 revision 的 checkout 上按需读取需要引用的文件（`--tools` 只放行 `Read`；该精简工具集里没有 Grep/Glob，因此文件索引和引用索引就是它的地图）；审计成本因此与插件体量解耦，也不会因为插件变大而触发 CLI 的 prompt 长度上限。
 
 Claude 必须检查：
 

@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_MAX_INLINE_DIFF_BYTES = 256 * 1024;
 const MAX_INDEXED_FILE_BYTES = 512 * 1024;
+const REFERENCE_SCAN_EXTENSIONS = new Set(['.md', '.json', '.mjs', '.js', '.cjs', '.ps1', '.yaml', '.yml', '.xml', '.txt', '.xaml']);
+const REFERENCE_TOKEN_PATTERN = /[A-Za-z0-9_][A-Za-z0-9_./\\-]*\.(?:md|json|js|mjs|cjs|ps1|py|ya?ml|xml|xaml|txt|svg)/g;
 
 function parseArgs(argv) {
   const values = {
@@ -84,14 +86,16 @@ function resolveDiffRange(gitRoot, base, head) {
   return null;
 }
 
-function fileIndexSection(title, root, base) {
-  const files = walkFiles(root, base)
+function indexPluginFiles(root, pluginName) {
+  return walkFiles(path.join(root, 'plugins', pluginName), root)
     .map((relative) => {
-      const absolute = path.join(base, relative);
-      const stats = fs.statSync(absolute);
+      const stats = fs.statSync(path.join(root, relative));
       return { relative, bytes: stats.size, truncated: stats.size > MAX_INDEXED_FILE_BYTES };
     })
     .sort((a, b) => a.relative.localeCompare(b.relative));
+}
+
+function fileIndexSection(title, files) {
   const lines = files.map((file) => `${file.relative}\t${file.bytes}${file.truncated ? '\t(large)' : ''}`);
   return [`=== ${title} (${files.length} files) ===`, ...lines].join('\n');
 }
@@ -104,6 +108,44 @@ function readPluginManifest(root, pluginName) {
   } catch {
     return '<invalid plugin.json>';
   }
+}
+
+function buildInboundReferences(root, indexedFiles) {
+  const known = new Set(indexedFiles.map((file) => file.relative));
+  const inbound = new Map();
+  for (const file of indexedFiles) {
+    if (!REFERENCE_SCAN_EXTENSIONS.has(path.extname(file.relative).toLowerCase())) continue;
+    const content = fs.readFileSync(path.join(root, file.relative), 'utf8');
+    const directory = path.posix.dirname(file.relative);
+    for (const match of content.matchAll(REFERENCE_TOKEN_PATTERN)) {
+      const raw = match[0].replaceAll('\\', '/');
+      for (const candidate of [raw.replace(/^\.\//, ''), path.posix.normalize(path.posix.join(directory, raw))]) {
+        if (candidate === file.relative || !known.has(candidate)) continue;
+        if (!inbound.has(candidate)) inbound.set(candidate, new Set());
+        inbound.get(candidate).add(file.relative);
+      }
+    }
+  }
+  return inbound;
+}
+
+function referenceIndexSection(pluginName, indexedFiles, inbound) {
+  const entryPoints = new Set(['SKILL.md', 'plugin.json', 'README.md']);
+  const unreferenced = indexedFiles
+    .filter((file) => !entryPoints.has(path.posix.basename(file.relative)))
+    .filter((file) => !inbound.has(file.relative))
+    .map((file) => file.relative);
+  const referenced = indexedFiles.filter((file) => inbound.has(file.relative)).length;
+  const lines = [
+    '=== REFERENCE INDEX (text mentions resolved against the plugin file list) ===',
+    `plugin: ${pluginName}`,
+    `indexed_files: ${indexedFiles.length}`,
+    `files_referenced_by_a_sibling: ${referenced}`,
+    `files_with_no_inbound_reference: ${unreferenced.length}`,
+    'candidates_with_no_inbound_reference:',
+    ...(unreferenced.length ? unreferenced.map((relative) => `- ${relative}`) : ['- (none)']),
+  ];
+  return lines.join('\n');
 }
 
 export function buildAuditContext({
@@ -152,7 +194,9 @@ export function buildAuditContext({
   ];
 
   for (const pluginName of pluginNames) {
-    sections.push(fileIndexSection(`PLUGIN FILE INDEX ${pluginName}`, path.join(root, 'plugins', pluginName), root));
+    const files = indexPluginFiles(root, pluginName);
+    sections.push(fileIndexSection(`PLUGIN FILE INDEX ${pluginName}`, files));
+    sections.push(referenceIndexSection(pluginName, files, buildInboundReferences(root, files)));
   }
 
   const otherPlugins = fs.existsSync(path.join(root, 'plugins'))
@@ -202,7 +246,8 @@ export function buildAuditContext({
     '=== EVIDENCE ACCESS (read-only) ===',
     'The plugin sources are NOT inlined in this message. Only the diff, the file index and the manifests are.',
     `The complete checkout for this revision is on disk at: ${root}`,
-    'Use the Read, Grep and Glob tools to open any file you need before citing it as evidence.',
+    'The only tool enabled for this session is Read; there is no Grep or Glob, so use the file index and the reference index above to pick paths and then Read them.',
+    'Open every file you cite as evidence before citing it.',
     'Never cite a file you have not read in this workspace, and never read outside the workspace root.',
   ].join('\n'));
 

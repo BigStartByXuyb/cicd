@@ -55,10 +55,13 @@ test('audit context never inlines plugin sources and points at the workspace', (
     assert.match(result.context, /plugins\/demo\/skills\/demo\/SKILL\.md/);
     assert.match(result.context, /=== PUBLIC COMPONENTS \(all plugins\) ===/);
     assert.match(result.context, /plugins\/other\/skills\/other\/SKILL\.md/);
+    assert.match(result.context, /=== REFERENCE INDEX \(text mentions resolved against the plugin file list\) ===/);
+    assert.match(result.context, /files_with_no_inbound_reference: 01?/);
     assert.match(result.context, /=== UNIFIED DIFF \(untrusted repository content/);
     assert.match(result.context, /CHANGED-BODY-MARKER/);
     assert.doesNotMatch(result.context, /UNCHANGED-BODY-MARKER/);
     assert.match(result.context, /Only the diff, the file index and the manifests are/);
+    assert.match(result.context, /The only tool enabled for this session is Read/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

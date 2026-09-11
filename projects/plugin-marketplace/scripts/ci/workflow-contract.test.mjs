@@ -28,7 +28,8 @@ test('semantic audit reads the workspace on demand instead of inlining plugin so
   assert.doesNotMatch(central, /audit-bundle\.md/);
   const contract = fs.readFileSync(path.resolve(process.cwd(), 'projects/plugin-marketplace/docs/plugin-semantic-audit.md'), 'utf8');
   assert.match(contract, /not inlined/);
-  assert.match(contract, /`Read`, `Grep` and `Glob`/);
+  assert.match(contract, /The runner enables only `Read`/);
+  assert.doesNotMatch(contract, /`Read`, `Grep` and `Glob`/);
 });
 
 test('semantic audit contract requires Simplified Chinese version 2 reports', () => {
