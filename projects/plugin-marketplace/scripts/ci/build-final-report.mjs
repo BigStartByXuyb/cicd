@@ -60,6 +60,7 @@ const markdown = [
   `- 语义审计：**${semanticResult}**`,
   `- 阻断问题：**${report.checks.semantic.blockingFindings}**`,
   `- 待确认问题：**${report.checks.semantic.reviewFindings}**`,
+  ...(report.checks.semantic.error ? [`- 语义审计失败原因：**${report.checks.semantic.error}**`] : []),
   '',
   '## 发现的问题',
   '',

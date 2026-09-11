@@ -20,6 +20,17 @@ test('semantic audit permits the configured DeepSeek model alias', () => {
   assert.doesNotMatch(central, /--model\s+deepseek-v4-flash/);
 });
 
+test('semantic audit reads the workspace on demand instead of inlining plugin sources', () => {
+  assert.match(central, /build-audit-context\.mjs/);
+  assert.doesNotMatch(central, /build-plugin-audit-bundle\.mjs/);
+  assert.match(central, /--tools\s+"?Read,Grep,Glob"?/);
+  assert.match(central, /--diff-output/);
+  assert.doesNotMatch(central, /audit-bundle\.md/);
+  const contract = fs.readFileSync(path.resolve(process.cwd(), 'projects/plugin-marketplace/docs/plugin-semantic-audit.md'), 'utf8');
+  assert.match(contract, /not inlined/);
+  assert.match(contract, /`Read`, `Grep` and `Glob`/);
+});
+
 test('semantic audit contract requires Simplified Chinese version 2 reports', () => {
   const contract = fs.readFileSync(path.resolve(process.cwd(), 'projects/plugin-marketplace/docs/plugin-semantic-audit.md'), 'utf8');
   assert.match(contract, /audit_version: 2/);

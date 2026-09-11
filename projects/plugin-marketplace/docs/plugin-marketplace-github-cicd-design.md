@@ -48,7 +48,7 @@ Organization Secrets；调用 workflow 和传参格式保持不变。
 - `.github/workflows/plugin-cicd.yml`：主工作流。
 - `projects/plugin-marketplace/scripts/ci/collect-changed-plugins.mjs`：识别提交中受影响的插件。
 - `projects/plugin-marketplace/scripts/ci/validate-marketplace.mjs`：目录、manifest、引用和版本检查。
-- `projects/plugin-marketplace/scripts/ci/build-plugin-audit-bundle.mjs`：构造 Claude 的完整审计输入。
+- `projects/plugin-marketplace/scripts/ci/build-audit-context.mjs`：构造 Claude 的小体量审计上下文（workspace 路径、diff、变更文件清单、文件索引），源码不进 prompt。
 - `projects/plugin-marketplace/scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告，并输出结构化语义报告。
 - `projects/plugin-marketplace/scripts/ci/build-deterministic-report.mjs`：将结构检查结果转换为 JSON/Markdown 报告。
 - `projects/plugin-marketplace/scripts/ci/build-final-report.mjs`：汇总结构检查和语义审计为唯一最终报告。
@@ -144,14 +144,15 @@ job 名称：`deterministic-validation`。
 
 job 名称：`semantic-audit`。
 
-只有 deterministic validation 成功后才能运行。输入必须包含：
+只有 deterministic validation 成功后才能运行。注入给 Claude 的审计上下文只包含：
 
-- 本次 PR 的完整 diff；
-- 本次提交每个插件的完整目录内容，而不是只有修改行；
-- `plugin.json`、所有 `SKILL.md`、references、scripts、assets、commands、agents、hooks、MCP/LSP/settings 和其他发布文件；
-- marketplace 注册信息和其他插件的公开入口摘要；
-- 确定性检查产生的路径、引用和版本证据；
-- `docs/plugin-semantic-audit.md` 固定的审计契约和提示词。
+- workspace 路径、被审计的 `head`/`base`、diff 范围；
+- 本次变更范围的 diff（小则内联，大则落盘给出路径）；
+- `git diff --name-status` 清单与 diffstat；
+- 变更插件的文件索引（路径 + 字节数）、其他插件的 `plugin.json`、marketplace 公开入口清单；
+- `docs/plugin-semantic-audit.md` 固定的审计契约和提示词（作为 trusted prompt）。
+
+插件源码不进 prompt。Claude 通过只读的 `Read` / `Grep` / `Glob` 工具，在被审计 revision 的 checkout 上按需读取需要引用的文件；审计成本因此与插件体量解耦，也不会因为插件变大而触发 CLI 的 prompt 长度上限。
 
 Claude 必须检查：
 
@@ -168,11 +169,13 @@ Claude 必须检查：
 CLI 使用只读模式：
 
 ```text
-claude -p <fixed prompt + audit bundle> \
+cd <audit root> && claude -p <fixed prompt> < <audit context> \
   --bare \
   --no-session-persistence \
   --output-format text \
   --permission-prompts none \
+  --tools "Read,Grep,Glob" \
+  --add-dir <runner temp> \
   --model claude-sonnet-4-6 \
   --max-budget-usd <limit>
 ```
@@ -363,13 +366,13 @@ v1 不自动修改版本、提交代码、推送 tag 或调用未定义的第三
 - Claude 超时、API 认证失败、CLI 非零退出或 Markdown 解析失败，状态为 `INVALID`。
 - 结构检查失败时不调用 Claude，但仍评论并发送飞书通知。
 - 保存脱敏后的报告、commit SHA、CLI 版本、审计契约版本、退出码和耗时。
-- 不上传完整 Secret、环境变量或未经脱敏的 prompt bundle。
+- 不上传完整 Secret、环境变量或未经脱敏的审计上下文与 CLI 日志。
 
 ## 12. 验收标准
 
 1. Pull Request 触发后，结构检查先运行。
 2. 结构检查失败时 Claude job 不启动。
-3. 结构通过后，Claude 收到提交插件完整目录，而不是只有 diff。
+3. 结构通过后，Claude 收到只读 workspace 与变更 diff，其余文件按需自行读取。
 4. Claude 检查所有规定的语义问题并返回固定 Markdown。
 5. 每次 PR 只有一条可更新的审计评论。
 6. 无论流水线成功、失败或跳过，`notify-feishu` 都尝试发送通知。
