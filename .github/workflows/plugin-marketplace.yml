@@ -162,28 +162,55 @@ jobs:
       - name: Install pinned Claude Code CLI
         run: npm install --global @anthropic-ai/claude-code@2.1.263
 
-      - name: Build audit bundle
+      - name: Build audit context
+        id: audit-context
         env:
           PLUGINS_JSON: ${{ needs.deterministic-validation.outputs.plugins }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then ROOT="$RUNNER_TEMP/pr-tree"; else ROOT="$MARKETPLACE_DIR"; fi
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
           plugin_args=()
           while IFS= read -r plugin; do plugin_args+=(--plugin "$plugin"); done < <(node -e "for (const p of JSON.parse(process.env.PLUGINS_JSON)) console.log(p)")
-          node "$CI_PROJECT_DIR/scripts/ci/build-plugin-audit-bundle.mjs" \
+          node "$CI_PROJECT_DIR/scripts/ci/build-audit-context.mjs" \
             --root "$ROOT" \
+            --git-root "$MARKETPLACE_DIR" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
             --contract-root "$CI_PROJECT_DIR" \
-            --output "$RUNNER_TEMP/audit-bundle.md" \
+            --output "$RUNNER_TEMP/audit-context.md" \
+            --diff-output "$RUNNER_TEMP/audit-diff.patch" \
             "${plugin_args[@]}"
 
       - name: Run DeepSeek-backed Claude audit
+        id: claude-audit
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
           CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: '1'
+          AUDIT_ROOT: ${{ steps.audit-context.outputs.root }}
         run: |
-          claude --bare --no-session-persistence --permission-prompts none --output-format text \
+          if [ ! -d "$AUDIT_ROOT" ]; then
+            echo "::error title=Audit workspace missing::$AUDIT_ROOT does not exist"
+            exit 1
+          fi
+          set +e
+          cd "$AUDIT_ROOT"
+          claude --bare --no-session-persistence --permission-prompts none \
+            --tools "Read,Grep,Glob" \
+            --add-dir "$RUNNER_TEMP" \
+            --output-format text \
             --model claude-sonnet-4-6 \
-            -p "$(cat "$CI_PROJECT_DIR/docs/plugin-semantic-audit.md")" < "$RUNNER_TEMP/audit-bundle.md" > "$RUNNER_TEMP/audit-report.md"
+            -p "$(cat "$CI_PROJECT_DIR/docs/plugin-semantic-audit.md")" \
+            < "$RUNNER_TEMP/audit-context.md" > "$RUNNER_TEMP/audit-report.md" 2> "$RUNNER_TEMP/audit-cli.log"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=Claude audit CLI failed::claude exited with code $status. See the CLI log below and the audit-context-cli artifact."
+          fi
+          cat "$RUNNER_TEMP/audit-cli.log" || true
+          exit "$status"
 
       - name: Parse audit report
         id: parse-report
@@ -200,6 +227,11 @@ jobs:
           result=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.result ?? 'INVALID')")
           blocking=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.blockingFindings ?? 0)")
           review=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.reviewFindings ?? 0)")
+          if [ "$result" = "INVALID" ]; then
+            reason=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.error ?? 'unknown')")
+            preview=$(head -c 300 "$RUNNER_TEMP/audit-report.md" | tr '\n' ' ')
+            echo "::error title=Semantic audit report is invalid::$reason :: report preview: $preview"
+          fi
           echo "result=$result" >> "$GITHUB_OUTPUT"
           echo "blocking_findings=$blocking" >> "$GITHUB_OUTPUT"
           echo "review_findings=$review" >> "$GITHUB_OUTPUT"
@@ -212,6 +244,9 @@ jobs:
           name: plugin-semantic-audit-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/audit-report.md
+            ${{ runner.temp }}/audit-context.md
+            ${{ runner.temp }}/audit-diff.patch
+            ${{ runner.temp }}/audit-cli.log
             ${{ runner.temp }}/semantic-report.json
             ${{ runner.temp }}/semantic-report.md
 
