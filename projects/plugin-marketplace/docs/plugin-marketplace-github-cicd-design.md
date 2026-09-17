@@ -47,6 +47,7 @@ Organization Secrets；调用 workflow 和传参格式保持不变。
 
 - `.github/workflows/plugin-cicd.yml`：主工作流。
 - `projects/plugin-marketplace/scripts/ci/collect-changed-plugins.mjs`：识别提交中受影响的插件。
+- `projects/plugin-marketplace/scripts/ci/lib/git-diff-range.mjs`：解析 diff 区间。tag 推送（以及分支首次推送）的 `github.event.before` 是 40 个零，不是真实 commit；该模块把全零或无法解析的 base 一律回退成 head 的父提交，避免 `git diff` 以 `fatal: bad object 0000…` 中止整个 job。`collect-changed-plugins.mjs` 与 `build-audit-context.mjs` 共用这一份实现。
 - `projects/plugin-marketplace/scripts/ci/validate-marketplace.mjs`：目录、manifest、引用和版本检查。
 - `projects/plugin-marketplace/scripts/ci/build-audit-context.mjs`：构造 Claude 的小体量审计上下文（workspace 路径、diff、变更文件清单、文件索引），源码不进 prompt。
 - `projects/plugin-marketplace/scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告，并输出结构化语义报告。

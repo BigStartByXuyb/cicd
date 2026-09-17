@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { runGit, resolveDiffRange } from './lib/git-diff-range.mjs';
 
 const DEFAULT_MAX_INLINE_DIFF_BYTES = 256 * 1024;
 const MAX_INDEXED_FILE_BYTES = 512 * 1024;
@@ -54,36 +54,6 @@ function walkFiles(root, base = root) {
     else result.push(path.relative(base, absolute).replaceAll('\\', '/'));
   }
   return result;
-}
-
-function runGit(gitRoot, args, { allowFailure = false } = {}) {
-  try {
-    return execFileSync('git', ['-C', gitRoot, ...args], {
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch (error) {
-    if (allowFailure) return null;
-    throw error;
-  }
-}
-
-function resolveDiffRange(gitRoot, base, head) {
-  const candidates = [];
-  if (base) candidates.push([base, head, `${base}..${head}`]);
-  candidates.push([`${head}~1`, head, `${head}~1..${head}`]);
-  for (const [from, to, label] of candidates) {
-    const check = runGit(gitRoot, ['rev-parse', '--verify', '--quiet', `${from}^{commit}`], { allowFailure: true });
-    if (check === null) continue;
-    const resolvedFrom = runGit(gitRoot, ['rev-parse', '--verify', '--quiet', `${from}^{commit}`], { allowFailure: true });
-    const resolvedTo = runGit(gitRoot, ['rev-parse', '--verify', '--quiet', `${to}^{commit}`], { allowFailure: true });
-    if (resolvedFrom === null || resolvedTo === null) continue;
-    const shortFrom = resolvedFrom.trim();
-    const shortTo = resolvedTo.trim();
-    return { from, to, label: `${shortFrom}..${shortTo}`, fromSha: shortFrom, toSha: shortTo };
-  }
-  return null;
 }
 
 function indexPluginFiles(root, pluginName) {

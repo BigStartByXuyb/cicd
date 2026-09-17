@@ -84,6 +84,9 @@ jobs:
       - name: Collect changed plugins
         id: changed-plugins
         env:
+          # A tag push (and a branch's first push) reports event.before as 40 zeros,
+          # which is not a commit: collect-changed-plugins.mjs treats an all-zero or
+          # otherwise unresolvable base as "use the head commit's parent".
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         working-directory: marketplace
