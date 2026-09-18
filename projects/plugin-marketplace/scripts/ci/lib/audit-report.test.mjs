@@ -57,25 +57,40 @@ test('normalizes a prose-wrapped fenced audit report', () => {
   assert.match(result.markdown, /^---\n/);
 });
 
+const chineseReportV2 = validReport
+  .replace('audit_version: 1', 'audit_version: 2')
+  .replace('# Plugin Semantic Audit', '# 插件语义审计')
+  .replace('## Summary', '## 摘要')
+  .replace('## Findings', '## 问题')
+  .replace('## Non-blocking observations', '## 非阻断观察')
+  .replace('## Audit limitations', '## 审计限制')
+  .replace('One review finding.', '发现一个需要确认的问题。')
+  .replace('Duplicate responsibility', '职责重复')
+  .replace('The responsibilities overlap.', '职责存在重叠。')
+  .replace('Clarify the boundary.', '明确职责边界。')
+  .replace('- Severity:', '- 严重级别:')
+  .replace('- Category:', '- 类别:')
+  .replace('- Confidence:', '- 置信度:')
+  .replace('- Scope:', '- 范围:');
+
 test('parses the Chinese version 2 report contract', () => {
-  const report = validReport
-    .replace('audit_version: 1', 'audit_version: 2')
-    .replace('# Plugin Semantic Audit', '# 插件语义审计')
-    .replace('## Summary', '## 摘要')
-    .replace('## Findings', '## 问题')
-    .replace('## Non-blocking observations', '## 非阻断观察')
-    .replace('## Audit limitations', '## 审计限制')
-    .replace('One review finding.', '发现一个需要确认的问题。')
-    .replace('Duplicate responsibility', '职责重复')
-    .replace('The responsibilities overlap.', '职责存在重叠。')
-    .replace('Clarify the boundary.', '明确职责边界。')
-    .replace('- Severity:', '- 严重级别:')
-    .replace('- Category:', '- 类别:')
-    .replace('- Confidence:', '- 置信度:')
-    .replace('- Scope:', '- 范围:');
-  const result = parseAuditReport(report);
+  const result = parseAuditReport(chineseReportV2);
   assert.equal(result.result, 'REVIEW');
   assert.equal(result.findings[0].category, 'DUPLICATE_RESPONSIBILITY');
+});
+
+test('tolerates a title and contract comment before the front matter', () => {
+  // 真实回归（v1.0.169 的 main run）：模型把 `# 插件语义审计` 与 contract 注释写在
+  // front matter 之前，旧实现从第一个 `---` 起切片，标题被切掉 → 误判 INVALID、
+  // 整轮 CI 因“audit report is missing # 插件语义审计”失败。
+  const report = `# 插件语义审计\n\n<!--\ncontract_sha256: e1ea2e0e8a7fb6dd\n-->\n\n${chineseReportV2}`;
+  const result = parseAuditReport(report);
+
+  assert.equal(result.result, 'REVIEW');
+  assert.equal(result.blockingFindings, 0);
+  assert.equal(result.reviewFindings, 1);
+  assert.equal(result.changedPlugins[0], 'example-plugin');
+  assert.equal(result.findings[0].id, 'REVIEW-001');
 });
 
 test('rejects a BLOCK finding without high confidence', () => {
