@@ -279,7 +279,9 @@ jobs:
 
       - name: Parse audit report
         id: parse-report
-        if: ${{ always() }}
+        # 被取消（同 PR 有更高优先级的新运行）时不要解析：此时 audit-report.md 是空的，
+        # 照旧解析只会产出一条「missing front matter」的假 INVALID，并被下游的汇总/评论发出去。
+        if: ${{ !cancelled() }}
         env:
           SEMANTIC_REPORT: ${{ runner.temp }}/semantic-report.json
         run: |
@@ -317,7 +319,7 @@ jobs:
 
   final-report:
     needs: [deterministic-validation, semantic-audit]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       decision: ${{ steps.aggregate.outputs.decision }}
@@ -389,7 +391,7 @@ jobs:
 
   publish-pr-report:
     needs: final-report
-    if: ${{ always() && github.event_name == 'pull_request_target' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request_target' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CI implementation
@@ -429,7 +431,7 @@ jobs:
 
   notify-feishu:
     needs: [deterministic-validation, semantic-audit, final-report, publish-pr-report]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CI implementation
