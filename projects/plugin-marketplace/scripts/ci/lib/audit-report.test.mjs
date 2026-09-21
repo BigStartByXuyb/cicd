@@ -108,3 +108,61 @@ test('rejects a BLOCK finding without high confidence', () => {
 test('rejects malformed audit output', () => {
   assert.throws(() => parseAuditReport('# free-form answer'), /front matter/);
 });
+
+// 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词
+// （medium / non-blocking）或漏掉反引号，旧实现直接抛出 'finding severity is invalid' → 整份报告判 INVALID，
+// 而报告自己的 front matter 明明是 `blocking_findings: 0`。kind 由 finding ID 前缀决定，字段只作人读。
+test('derives the finding kind from the ID prefix when the Severity field uses a non-enum word', () => {
+  const sloppy = validReport.replace('- Severity: `REVIEW`', '- Severity: non-blocking');
+  const result = parseAuditReport(sloppy);
+
+  assert.equal(result.result, 'REVIEW');
+  assert.equal(result.findings[0].severity, 'REVIEW');
+  assert.equal(result.reviewFindings, 1);
+});
+
+test('derives the finding kind from the ID prefix when the Severity field is missing', () => {
+  const report = validReport.replace('- Severity: `REVIEW`\n', '');
+  const result = parseAuditReport(report);
+
+  assert.equal(result.findings[0].severity, 'REVIEW');
+  assert.equal(result.findings[0].id, 'REVIEW-001');
+});
+
+test('rejects a Severity field that contradicts the finding ID prefix', () => {
+  const report = validReport
+    .replace('- Severity: `REVIEW`', '- Severity: `BLOCK`')
+    .replace('- Confidence: `medium`', '- Confidence: `high`');
+
+  assert.throws(() => parseAuditReport(report), /与 ID 前缀/);
+});
+
+// 真实回归（plugin-marketplace PR #7 的 audit7 / audit8 / audit10）：模型整组字段都没写反引号
+// （`- Severity: non-blocking` / `- Confidence: medium` / `- Scope: …`）。只放宽 severity 仍会在
+// confidence 上判 INVALID —— 反引号是渲染细节，不该是契约。
+test('accepts bare (non-backquoted) values on every field line', () => {
+  const bare = validReport
+    .replace('- Severity: `REVIEW`', '- Severity: non-blocking')
+    .replace('- Category: `DUPLICATE_RESPONSIBILITY`', '- Category: UNCLEAR_WORDING')
+    .replace('- Confidence: `medium`', '- Confidence: medium')
+    .replace('- Scope: `example-plugin`', '- Scope: example-plugin');
+  const result = parseAuditReport(bare);
+
+  assert.equal(result.findings[0].severity, 'REVIEW');
+  assert.equal(result.findings[0].category, 'UNCLEAR_WORDING');
+  assert.equal(result.findings[0].confidence, 'medium');
+  assert.equal(result.findings[0].scope, 'example-plugin');
+  assert.equal(result.findings[0].evidence.length, 1);
+});
+
+test('a BLOCK finding still requires high confidence when fields are bare', () => {
+  const bare = validReport
+    .replace('result: REVIEW', 'result: BLOCK')
+    .replace('blocking_findings: 0', 'blocking_findings: 1')
+    .replace('review_findings: 1', 'review_findings: 0')
+    .replace('### [REVIEW-001]', '### [BLOCK-001]')
+    .replace('- Severity: `REVIEW`', '- Severity: BLOCK')
+    .replace('- Confidence: `medium`', '- Confidence: medium');
+
+  assert.throws(() => parseAuditReport(bare), /BLOCK finding must have high confidence/);
+});

@@ -101,12 +101,25 @@ export function parseAuditReport(markdown) {
     const block = documentText.slice(start, end);
     const id = headings[index][1];
     const title = headings[index][2].trim();
-    const severity = block.match(/^- (?:Severity|严重级别): `([^`]+)`$/m)?.[1];
-    const category = block.match(/^- (?:Category|类别): `([^`]+)`$/m)?.[1] ?? null;
-    const confidence = block.match(/^- (?:Confidence|置信度): `([^`]+)`$/m)?.[1];
-    const scope = block.match(/^- (?:Scope|范围): `([^`]+)`$/m)?.[1] ?? null;
+    // 字段值带不带反引号都接受：反引号只是渲染细节（模板里有，模型时写时不写），
+    // 而「没写反引号」不改变报告含义。真正判 INVALID 的是语义问题（枚举冲突 / 缺证据 /
+    // BLOCK 缺 high 置信度 / 计数不符 / 缺小节……），见下方各断言。
+    const field = (labels) => (block.match(new RegExp(`^- (?:${labels.join('|')}):\\s*(.+?)\\s*$`, 'm'))?.[1] ?? '')
+      .replace(/`/g, '')
+      .trim();
+    // finding ID 前缀是 kind 的权威来源：标题正则已把 ID 限定为 BLOCK-*/REVIEW-*。
+    // `- Severity:` 只作人读字段——写成 human 等级词（high / medium / non-blocking）或漏反引号都不再让
+    // 整份报告失效；但它与 ID 前缀**冲突**时仍然报错：那是报告自相矛盾，不能默默采信。
+    const severityFromId = id.split('-')[0];
+    const severityField = field(['Severity', '严重级别']);
+    if (SEVERITIES.has(severityField) && severityField !== severityFromId) {
+      throw new Error(`finding ${id} 的 Severity 字段（${severityField}）与 ID 前缀（${severityFromId}）不一致`);
+    }
+    const severity = SEVERITIES.has(severityField) ? severityField : severityFromId;
+    const category = field(['Category', '类别']) || null;
+    const confidence = field(['Confidence', '置信度']);
+    const scope = field(['Scope', '范围']) || null;
     const evidence = [...block.matchAll(/`([^`\r\n]+:\d+)`/g)].map((match) => match[1]);
-    if (!SEVERITIES.has(severity)) throw new Error('finding severity is invalid');
     if (!confidence) throw new Error('finding confidence is missing');
     if (severity === 'BLOCK' && confidence !== 'high') {
       throw new Error('BLOCK finding must have high confidence');
