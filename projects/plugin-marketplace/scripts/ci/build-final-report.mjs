@@ -19,13 +19,18 @@ if (!outputJsonPath || !outputMarkdownPath) throw new Error('--output-json and -
 
 const deterministicStatus = deterministic?.status ?? 'MISSING';
 const semanticResult = semantic?.result ?? 'SKIPPED';
+// INVALID（报告不合契约、不能采信）与 BLOCK（确实发现了阻断问题）是两回事：
+// 混成同一个结论会让人以为代码被阻断，而同一份报告里又写着「阻断问题：0」。
+// 检查仍然失败（由语义审计 job 的退出码决定），只是结论名如实反映原因。
 const decision = deterministicStatus !== 'PASS'
   ? 'BLOCK'
-  : semanticResult === 'BLOCK' || semanticResult === 'INVALID'
+  : semanticResult === 'BLOCK'
     ? 'BLOCK'
-    : semanticResult === 'REVIEW' || semanticResult === 'SKIPPED'
-      ? 'REVIEW'
-      : 'PASS';
+    : semanticResult === 'INVALID'
+      ? 'INVALID'
+      : semanticResult === 'REVIEW' || semanticResult === 'SKIPPED'
+        ? 'REVIEW'
+        : 'PASS';
 const report = {
   schemaVersion: 1,
   kind: 'plugin-ci-final',
@@ -61,6 +66,9 @@ const markdown = [
   `- 阻断问题：**${report.checks.semantic.blockingFindings}**`,
   `- 待确认问题：**${report.checks.semantic.reviewFindings}**`,
   ...(report.checks.semantic.error ? [`- 语义审计失败原因：**${report.checks.semantic.error}**`] : []),
+  ...(semanticResult === 'INVALID'
+    ? ['- 说明：`INVALID` 表示审计报告不合契约、无法采信，**不是发现了阻断问题**——检查因报告不可信而失败，请重跑语义审计或按上一条原因修报告格式。']
+    : []),
   '',
   '## 发现的问题',
   '',

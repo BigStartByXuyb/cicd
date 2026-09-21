@@ -122,6 +122,68 @@ jobs:
             ${{ runner.temp }}/deterministic-report.json
             ${{ runner.temp }}/deterministic-report.md
 
+  # 无 secrets 的运行时回归：把插件自带的 JS / PowerShell 测试真的跑一遍。
+  # 为什么单独一个 job：pull_request_target 的工作流带 pull-requests/issues 写权限，而这里执行的是
+  # **未受信任的 PR 代码**（测试脚本本身来自 PR），所以本 job 把权限收窄到 contents: read，且不注入任何 secrets。
+  # 确定性校验只查清单/目录/必需文件，语义审计只读不执行——两者都不能替代"测试真的跑过"。
+  runtime-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller marketplace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+          path: marketplace
+          persist-credentials: false
+
+      - name: Materialize PR tree as read-only input
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.clone_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        working-directory: marketplace
+        run: |
+          git fetch --no-tags --depth=1 "$HEAD_REPOSITORY" "$HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/pr-tree"
+          git archive "$HEAD_SHA" | tar -x -C "$RUNNER_TEMP/pr-tree"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run JavaScript plugin tests
+        run: |
+          ROOT="$MARKETPLACE_DIR"
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then ROOT="$RUNNER_TEMP/pr-tree"; fi
+          cd "$ROOT"
+          files=$(find plugins -path '*/scripts/tests/*.test.js' | sort)
+          if [ -z "$files" ]; then echo "::error title=No plugin tests found::plugins/**/scripts/tests/*.test.js 未匹配到任何用例"; exit 1; fi
+          echo "$files"
+          node --test $files
+
+      - name: Run PowerShell plugin tests
+        shell: pwsh
+        run: |
+          $root = $env:MARKETPLACE_DIR
+          if ("${{ github.event_name }}" -eq 'pull_request_target') { $root = Join-Path $env:RUNNER_TEMP 'pr-tree' }
+          Push-Location $root
+          try {
+            $files = @(Get-ChildItem 'plugins/*/skills/*/scripts/tests/*.tests.ps1' -ErrorAction SilentlyContinue)
+            if ($files.Count -eq 0) { throw 'plugins/**/scripts/tests/*.tests.ps1 未匹配到任何用例' }
+            $failed = @()
+            foreach ($file in $files) {
+              pwsh -NoProfile -File $file.FullName
+              if ($LASTEXITCODE -ne 0) { $failed += $file.Name }
+            }
+            if ($failed.Count -gt 0) { throw ('PowerShell 用例失败: ' + ($failed -join ', ')) }
+          }
+          finally { Pop-Location }
+
   semantic-audit:
     needs: deterministic-validation
     if: ${{ needs.deterministic-validation.result == 'success' }}
@@ -217,7 +279,9 @@ jobs:
 
       - name: Parse audit report
         id: parse-report
-        if: ${{ always() }}
+        # 被取消（同 PR 有更高优先级的新运行）时不要解析：此时 audit-report.md 是空的，
+        # 照旧解析只会产出一条「missing front matter」的假 INVALID，并被下游的汇总/评论发出去。
+        if: ${{ !cancelled() }}
         env:
           SEMANTIC_REPORT: ${{ runner.temp }}/semantic-report.json
         run: |
@@ -255,7 +319,7 @@ jobs:
 
   final-report:
     needs: [deterministic-validation, semantic-audit]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       decision: ${{ steps.aggregate.outputs.decision }}
@@ -327,7 +391,7 @@ jobs:
 
   publish-pr-report:
     needs: final-report
-    if: ${{ always() && github.event_name == 'pull_request_target' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request_target' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CI implementation
@@ -367,7 +431,7 @@ jobs:
 
   notify-feishu:
     needs: [deterministic-validation, semantic-audit, final-report, publish-pr-report]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CI implementation

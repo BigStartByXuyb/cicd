@@ -64,6 +64,8 @@ Language requirement: write the summary, finding titles, explanations, suggested
 
 Every finding must use exactly one category and one severity:
 
+`- Severity:` accepts only the two finding-kind tokens `BLOCK` and `REVIEW` (backquoted in the template; the parser also accepts bare values). Do not write severity adjectives such as `high`, `medium`, `low`, or `non-blocking`: the value is the finding *kind*, not a severity grade. The finding ID prefix (`[BLOCK-###]` / `[REVIEW-###]`) is the authoritative source of the kind — the parser derives the kind from the ID, and only fails when a well-formed `- Severity:` field contradicts it.
+
 | Category | Meaning | Default severity |
 | --- | --- | --- |
 | `CONTRADICTION` | Two applicable rules or contracts require incompatible behavior. | `BLOCK` when evidence is high confidence; otherwise `REVIEW` |
@@ -125,14 +127,14 @@ changed_plugins:
 使用简体中文列出缺失上下文、未解析引用或不确定结论。没有时写 `None`。
 ```
 
-The parser must verify the front matter, result enum, counts, changed plugin list, heading order, finding IDs, severity/category enums, and evidence paths. Version 2 reports must use the Chinese headings above and Chinese human-readable prose. Version 1 reports remain readable for historical artifacts. The parser must fail closed when the report is malformed, missing evidence, or contains a `BLOCK` finding whose confidence is not `high`.
+The parser must verify the front matter, result enum, counts, changed plugin list, heading order, finding IDs (the ID prefix carries the finding kind), category enums, and evidence paths. Version 2 reports must use the Chinese headings above and Chinese human-readable prose. Version 1 reports remain readable for historical artifacts. The parser must fail closed when the report is malformed, missing evidence, or contains a `BLOCK` finding whose confidence is not `high`. Field *formatting* is not a contract: `- Severity:` / `- Category:` / `- Confidence:` / `- Scope:` values may be backquoted or bare, and a missing or non-enum `- Severity:` does not invalidate the report (the ID prefix decides the kind). What still fails closed is a field that contradicts the ID prefix.
 
 ## CI interpretation
 
 - `PASS`: no findings; the semantic job succeeds.
 - `REVIEW`: only non-blocking findings; the job succeeds and publishes the report as a PR comment and artifact.
 - `BLOCK`: at least one valid high-confidence blocking finding; the required check fails and the report is published.
-- `INVALID`: malformed or incomplete output; the required check fails because the audit cannot be trusted.
+- `INVALID`: malformed or incomplete output; the required check fails because the audit cannot be trusted. The final report states `INVALID` as its own decision and must not label this case `BLOCK` — no blocking finding was established.
 
 The CI job must also publish the exact contract digest (`contract_sha256` in the audit context), the Claude Code CLI version, the input commit SHA, the audit context itself, and the report artifact. It must never publish the API key, complete environment variables, or unredacted command output containing secrets.
 

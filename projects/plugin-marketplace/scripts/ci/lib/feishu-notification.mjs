@@ -4,7 +4,7 @@ function shortSha(value) {
 
 function statusFor(input) {
   if ([input.deterministicResult, input.semanticResult].includes('cancelled')) return 'CANCELLED';
-  if (['PASS', 'REVIEW', 'BLOCK'].includes(input.finalDecision)) return input.finalDecision;
+  if (['PASS', 'REVIEW', 'BLOCK', 'INVALID'].includes(input.finalDecision)) return input.finalDecision;
   if (input.deterministicResult !== 'success') return 'FAILED_BEFORE_AUDIT';
   if (input.auditResult === 'BLOCK') return 'BLOCK';
   if (input.auditResult === 'INVALID' || input.semanticResult === 'failure') return 'INVALID';

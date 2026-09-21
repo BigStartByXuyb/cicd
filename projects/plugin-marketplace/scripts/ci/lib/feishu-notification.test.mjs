@@ -69,6 +69,27 @@ test('uses the aggregated final decision and finding counts', () => {
   assert.match(message.markdown, /普通建议：2/);
 });
 
+test('reports an unusable audit report as INVALID, not as BLOCK', () => {
+  const message = buildFeishuNotification({
+    repository: 'BigStartByXuyb/Plugins',
+    pullRequestNumber: 47,
+    pullRequestTitle: 'Audit report did not follow the contract',
+    commitSha: '1234567890ab',
+    authorLogin: 'alice',
+    changedPlugins: ['example-plugin'],
+    deterministicResult: 'success',
+    semanticResult: 'failure',
+    auditResult: 'INVALID',
+    finalDecision: 'INVALID',
+    blockingFindings: 0,
+    reviewFindings: 0,
+    reportUrl: 'https://github.com/BigStartByXuyb/Plugins/actions/runs/5',
+  });
+
+  assert.equal(message.status, 'INVALID');
+  assert.match(message.markdown, /阻断问题：0/);
+});
+
 test('reports failed validation and does not pretend Claude ran', () => {
   const message = buildFeishuNotification({
     repository: 'BigStartByXuyb/Plugins',
