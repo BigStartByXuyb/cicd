@@ -43,6 +43,8 @@ test('workflow declares the jobs, pins the CI ref, and references only existing 
   assert.match(WORKFLOW, /ci_ref:/);
   assert.match(WORKFLOW, /ref:\s*\$\{\{ inputs\.ci_ref \}\}/);
   assert.match(WORKFLOW, /npm run test:coverage/);
+  assert.match(WORKFLOW, /cd "\$ROOT\/ui"/, '前端单测必须真的跑起来');
+  assert.match(WORKFLOW, /ui-coverage\.txt/);
   assert.match(WORKFLOW, /check-app-structure\.mjs/);
   assert.match(WORKFLOW, /build-audit-context\.mjs/);
   assert.match(WORKFLOW, /parse-app-audit-report\.mjs/);

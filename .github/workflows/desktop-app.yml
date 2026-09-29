@@ -185,12 +185,23 @@ jobs:
           cd "$ROOT"
           npm run test:coverage 2>&1 | tee "$RUNNER_TEMP/coverage.txt"
 
+      # 前端单测与覆盖率：阈值同样写在 ui/package.json 的 test:coverage 里。
+      - name: Run frontend tests and coverage gate
+        env:
+          ROOT: ${{ steps.test-root.outputs.root }}
+        run: |
+          cd "$ROOT/ui"
+          npm ci --ignore-scripts
+          npm run test:coverage 2>&1 | tee "$RUNNER_TEMP/ui-coverage.txt"
+
       - name: Upload coverage output
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: app-coverage-${{ github.run_id }}
-          path: ${{ runner.temp }}/coverage.txt
+          path: |
+            ${{ runner.temp }}/coverage.txt
+            ${{ runner.temp }}/ui-coverage.txt
 
   semantic-audit:
     needs: deterministic-validation
@@ -251,7 +262,10 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then ROOT="$RUNNER_TEMP/app-tree"; else ROOT="$APP_DIR"; fi
           echo "root=$ROOT" >> "$GITHUB_OUTPUT"
           coverage_args=()
-          if [ -f "$RUNNER_TEMP/coverage/coverage.txt" ]; then coverage_args+=(--coverage-report "$RUNNER_TEMP/coverage/coverage.txt"); fi
+          if [ -f "$RUNNER_TEMP/coverage/coverage.txt" ] || [ -f "$RUNNER_TEMP/coverage/ui-coverage.txt" ]; then
+            cat "$RUNNER_TEMP/coverage/coverage.txt" "$RUNNER_TEMP/coverage/ui-coverage.txt" 2>/dev/null > "$RUNNER_TEMP/coverage-all.txt"
+            coverage_args+=(--coverage-report "$RUNNER_TEMP/coverage-all.txt")
+          fi
           node "$CI_PROJECT_DIR/scripts/ci/build-audit-context.mjs" \
             --root "$ROOT" \
             --git-root "$APP_DIR" \
