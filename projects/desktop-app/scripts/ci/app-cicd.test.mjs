@@ -88,6 +88,45 @@ test('UI importing backend implementation is a layering violation', () => {
   fs.rmSync(fx.root, { recursive: true, force: true });
 });
 
+test('caller workflow pin must be a commit SHA and must match ci_ref', () => {
+  const fx = fixture();
+  // 这个用例只验 pin：把 lib 收拾干净，避免孤儿导出干扰结论。
+  fx.write('lib/board.js', 'function createBoard() { return 1; }\nmodule.exports = { createBoard };\n');
+  fx.write('.github/workflows/ci.yml', [
+    'jobs:',
+    '  ci:',
+    '    uses: Owner/cicd/.github/workflows/desktop-app.yml@' + 'a'.repeat(40),
+    '    with:',
+    '      ci_ref: ' + 'b'.repeat(40),
+    ''
+  ].join('\n'));
+  const mismatch = runScriptRaw('check-app-structure.mjs', ['--root', fx.root]);
+  assert.equal(mismatch.status, 1);
+  assert.match(mismatch.stdout, /不一致/);
+
+  fx.write('.github/workflows/ci.yml', [
+    'jobs:',
+    '  ci:',
+    '    uses: Owner/cicd/.github/workflows/desktop-app.yml@main',
+    '    with:',
+    '      ci_ref: main',
+    ''
+  ].join('\n'));
+  const unpinned = runScriptRaw('check-app-structure.mjs', ['--root', fx.root]);
+  assert.match(unpinned.stdout, /不是 commit SHA/);
+
+  fx.write('.github/workflows/ci.yml', [
+    'jobs:',
+    '  ci:',
+    '    uses: Owner/cicd/.github/workflows/desktop-app.yml@' + 'a'.repeat(40),
+    '    with:',
+    '      ci_ref: ' + 'a'.repeat(40),
+    ''
+  ].join('\n'));
+  assert.match(runScript('check-app-structure.mjs', ['--root', fx.root]), /结论：PASS/);
+  fs.rmSync(fx.root, { recursive: true, force: true });
+});
+
 test('check-app-structure passes a clean fixture and fails a leaking one', () => {
   const clean = fixture();
   clean.write('lib/board.js', 'function createBoard() { return 1; }\nmodule.exports = { createBoard };\n');

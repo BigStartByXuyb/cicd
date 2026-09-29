@@ -18,6 +18,31 @@ function arg(name, fallback = null) {
   return index >= 0 ? process.argv[index + 1] : fallback;
 }
 
+/*
+ * 调用方 workflow 里的 pin 有两个出现位置（`uses:` 与 `ci_ref:`）——GitHub 不允许 `uses:` 用变量，
+ * 所以无法合成一处。这里把它们钉成「必须一致且必须是 commit SHA」，改一处漏另一处会当场失败。
+ */
+function findCiPinMismatch(root) {
+  const file = path.join(root, '.github', 'workflows', 'ci.yml');
+  if (!fs.existsSync(file)) return [];
+  const text = fs.readFileSync(file, 'utf8');
+  const used = text.match(/uses:\s*\S+@([^\s]+)/)?.[1] ?? '';
+  const declared = text.match(/^\s*ci_ref:\s*([^\s]+)/m)?.[1] ?? '';
+  const findings = [];
+  const relative = '.github/workflows/ci.yml';
+  if (!used || !declared) {
+    findings.push({ check: 'ci-pin', kind: 'missing-pin', path: relative, line: 1, message: 'workflow 缺少 uses@<ref> 或 ci_ref 入参，无法固定 CI 版本' });
+    return findings;
+  }
+  if (used !== declared) {
+    findings.push({ check: 'ci-pin', kind: 'pin-mismatch', path: relative, line: 1, message: `uses 的 ${used} 与 ci_ref 的 ${declared} 不一致：改 pin 要两处一起改` });
+  }
+  if (!/^[0-9a-f]{40}$/.test(used)) {
+    findings.push({ check: 'ci-pin', kind: 'unpinned', path: relative, line: 1, message: `CI 版本 ${used} 不是 commit SHA：分支/标签会漂移，门禁会被上游静默改掉` });
+  }
+  return findings;
+}
+
 const root = path.resolve(arg('--root', process.cwd()));
 if (!fs.existsSync(path.join(root, 'package.json'))) throw new Error(`--root 不是应用仓库根（缺 package.json）：${root}`);
 
@@ -36,6 +61,11 @@ const checks = [
     name: 'layering',
     title: '前后端分层没有被绕过',
     findings: findLayerViolations({ root })
+  },
+  {
+    name: 'ci-pin',
+    title: 'CI 版本钉死且两处一致',
+    findings: findCiPinMismatch(root)
   }
 ];
 

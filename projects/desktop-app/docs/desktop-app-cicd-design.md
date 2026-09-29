@@ -20,6 +20,7 @@
 | 硬编码机器路径 | `lib/**`、`server.js`、`ui/src/**` 里出现 `X:\`、`/Users/`、`/home/`、`file://`（注释行除外） | 换机器跑不了；或者悄悄写到别人机器上的路径 |
 | 孤儿导出 | `lib/*.js` 导出的名字在仓库别处没有任何引用（含 `mod.name` 形式） | 死代码堆积：改了没人知道，读代码的人以为它有用 |
 | 分层 | `ui/src/**` 引用后端实现或 `server.js`；后端引用 `ui/**` | 前端绕过接口直接碰后端内部，重构时两处一起崩 |
+| CI 版本钉死 | 调用方 workflow 的 `uses@<ref>` 不是 40 位 commit SHA，或与 `ci_ref` 入参不一致 | 门禁被上游静默改掉；两处 pin 漂移成「外层一个版本、内层另一个版本」 |
 | 构建产物一致 | `npm run build:ui` 之后 `git diff --exit-code public/` 有改动 | 前端源码改了忘了重新构建：仓库里看不出来，用户那儿是旧界面 |
 | 单元测试 | `npm test` 任一用例失败 | 行为回归 |
 | 覆盖率阈值 | `npm run test:coverage`（阈值写在调用方 `package.json`：`--test-coverage-lines/functions/branches`，只统计 `lib/**`） | 新逻辑没被测到就合进主干 |
