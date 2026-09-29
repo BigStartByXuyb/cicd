@@ -66,7 +66,9 @@ function parseInteger(value, field) {
   return Number(value);
 }
 
-export function parseAuditReport(markdown) {
+// title 是报告一级标题：默认插件套件的口径，其它套件（例如应用）传自己的标题，
+// 报告契约（front matter、finding 形状、章节顺序）保持同一份。
+export function parseAuditReport(markdown, { title = '# 插件语义审计' } = {}) {
   // documentText：全文（保留 front matter 之前的标题/注释），用于 front matter 定位与各小节检查；
   // normalizedMarkdown：从 front matter 起的正文，保持历史产物形态。
   const documentText = normalizeAuditDocument(markdown);
@@ -77,7 +79,7 @@ export function parseAuditReport(markdown) {
   const auditVersion = String(frontMatter.audit_version);
   if (!AUDIT_VERSIONS.has(auditVersion)) throw new Error('unsupported audit_version');
   const requiredSections = auditVersion === '2'
-    ? ['# 插件语义审计', '## 摘要', '## 问题', '## 非阻断观察', '## 审计限制']
+    ? [title, '## 摘要', '## 问题', '## 非阻断观察', '## 审计限制']
     : ['# Plugin Semantic Audit', '## Summary', '## Findings', '## Non-blocking observations', '## Audit limitations'];
 
   const blockingFindings = parseInteger(frontMatter.blocking_findings, 'blocking_findings');

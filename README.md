@@ -14,12 +14,21 @@ never live in this repository.
 ```text
 .github/workflows/                 # GitHub requires reusable workflows here
   plugin-marketplace.yml            # entry point for plugin marketplace
+  desktop-app.yml                   # entry point for desktop/client apps
 projects/
   plugin-marketplace/               # one complete CI/CD suite
     scripts/ci/
     docs/
-shared/                             # future cross-project utilities
+  desktop-app/                      # Node backend + React frontend clients
+    scripts/ci/
+    docs/
+shared/ci/                          # cross-suite utilities (Feishu send, PR comment)
 ```
+
+The desktop-app suite gates unit tests, coverage thresholds, hardcoded machine paths, orphan
+exports, layering, build-output consistency, and a DeepSeek-backed Claude semantic audit whose
+contract lives in `projects/desktop-app/docs/app-semantic-audit.md`. Callers pin `ci_ref` to a
+commit SHA so a change to the CI logic is always an explicit change on their side.
 
 The marketplace repository currently calls:
 
