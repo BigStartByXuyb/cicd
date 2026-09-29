@@ -45,6 +45,8 @@ test('workflow declares the jobs, pins the CI ref, and references only existing 
   assert.match(WORKFLOW, /npm run test:coverage/);
   assert.match(WORKFLOW, /cd "\$ROOT\/ui"/, '前端单测必须真的跑起来');
   assert.match(WORKFLOW, /ui-coverage\.txt/);
+  // 覆盖率步骤带 tee：没有 pipefail 就会把 npm 的失败退出码吞掉，门禁形同虚设。
+  assert.equal((WORKFLOW.match(/set -o pipefail/g) ?? []).length, 2, '两个覆盖率步骤都必须 set -o pipefail');
   assert.match(WORKFLOW, /check-app-structure\.mjs/);
   assert.match(WORKFLOW, /build-audit-context\.mjs/);
   assert.match(WORKFLOW, /parse-app-audit-report\.mjs/);

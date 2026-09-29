@@ -182,6 +182,8 @@ jobs:
           ROOT: ${{ steps.test-root.outputs.root }}
           MASTERGO_PLUGIN_ROOT: ${{ github.workspace }}/runtime-plugin/plugins/mastergo-wpf-transcoder
         run: |
+          # 管道会把 npm 的退出码换成 tee 的：没有 pipefail，覆盖率不达标也会显示成功。
+          set -o pipefail
           cd "$ROOT"
           npm run test:coverage 2>&1 | tee "$RUNNER_TEMP/coverage.txt"
 
@@ -190,6 +192,7 @@ jobs:
         env:
           ROOT: ${{ steps.test-root.outputs.root }}
         run: |
+          set -o pipefail
           cd "$ROOT/ui"
           npm ci --ignore-scripts
           npm run test:coverage 2>&1 | tee "$RUNNER_TEMP/ui-coverage.txt"
