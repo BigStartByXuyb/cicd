@@ -57,6 +57,19 @@ test('normalizes a prose-wrapped fenced audit report', () => {
   assert.match(result.markdown, /^---\n/);
 });
 
+/*
+ * 标题是给人读的：模型偶尔只写 `### [REVIEW-001]`。
+ * 那仍是一条 finding —— 只因为漏写标题就把整份报告判成 INVALID，等于把格式问题当语义问题。
+ */
+test('accepts a finding heading without a human title', () => {
+  const result = parseAuditReport(validReport.replace('### [REVIEW-001] Duplicate responsibility', '### [REVIEW-001]'));
+
+  assert.equal(result.reviewFindings, 1);
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].id, 'REVIEW-001');
+  assert.equal(result.findings[0].title, '');
+});
+
 const chineseReportV2 = validReport
   .replace('audit_version: 1', 'audit_version: 2')
   .replace('# Plugin Semantic Audit', '# 插件语义审计')
