@@ -96,7 +96,9 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   }
 
   const findings = [];
-  const headings = [...documentText.matchAll(/^### \[((?:BLOCK|REVIEW)-\d+)\] (.+)$/gm)];
+  // 标题是给人读的：`### [REVIEW-001]` 后面漏写标题仍是一条 finding ——
+  // 判 INVALID 的是语义问题（枚举冲突 / 缺证据 / 计数不符……），不是标题写没写。
+  const headings = [...documentText.matchAll(/^### \[((?:BLOCK|REVIEW)-\d+)\](.*)$/gm)];
   for (let index = 0; index < headings.length; index += 1) {
     const start = headings[index].index;
     const end = headings[index + 1]?.index ?? documentText.length;
