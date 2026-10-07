@@ -2,6 +2,12 @@ const RESULTS = new Set(['PASS', 'REVIEW', 'BLOCK', 'INVALID']);
 const SEVERITIES = new Set(['BLOCK', 'REVIEW']);
 const AUDIT_VERSIONS = new Set(['1', '2']);
 const HAN_PATTERN = /\p{Script=Han}/u;
+/*
+ * 证据 = 反引号里带行号的引用。接受的写法：
+ *   `lib/a.js:12`、`lib/a.js:12-15`（区间）、`lib/a.js:12,15`（几处）、`C:\路径\a.js:12`。
+ * 网址不算证据 —— `https://host:8443/x` 是地址不是代码位置，所以排掉 http(s):// 开头的那一类。
+ */
+const EVIDENCE_PATTERN = /`((?!https?:\/\/)[^`\r\n]+:\d+(?:[-–~]\s*\d+)*(?:\s*,\s*\d+)*)`/g;
 
 // 报告全文：只去 BOM、首尾空白与「最外层代码围栏」，**不切掉 front matter 之前的标题/注释**
 // （模型常把 `# 插件语义审计` 与 `<!-- contract_sha256 ... -->` 写在最前面）。
@@ -123,7 +129,7 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
     const category = field(['Category', '类别']) || null;
     const confidence = field(['Confidence', '置信度']);
     const scope = field(['Scope', '范围']) || null;
-    const evidence = [...block.matchAll(/`([^`\r\n]+:\d+)`/g)].map((match) => match[1]);
+    const evidence = [...block.matchAll(EVIDENCE_PATTERN)].map((match) => match[1]);
     if (!confidence) throw new Error('finding confidence is missing');
     if (severity === 'BLOCK' && confidence !== 'high') {
       throw new Error('BLOCK finding must have high confidence');
