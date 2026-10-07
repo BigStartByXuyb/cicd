@@ -94,7 +94,7 @@ changed_projects:
 - Category: `DUPLICATED_RESPONSIBILITY`
 - Confidence: `high`
 - Scope: `mastergo-transcoder-gui`
-- Evidence:
+- Evidence:（每条都要是代码位置；单行 `lib/example.js:12`、区间 `lib/example.js:12-15`、几处 `lib/example.js:12,15` 都算，网址不算证据）
   - `lib/example.js:12`
   - `lib/other.js:40`
 - Why it matters: （证据如何证明这个问题，以及会造成什么后果。）

@@ -70,6 +70,24 @@ test('accepts a finding heading without a human title', () => {
   assert.equal(result.findings[0].title, '');
 });
 
+/*
+ * 证据的写法：单行、区间、几处都算；网址不算（那是地址，不是代码位置）。
+ * 只因为把证据写成区间 `a.js:12-15` 就判 INVALID，等于把格式问题当语义问题。
+ */
+test('accepts line ranges as evidence and ignores urls', () => {
+  const withRange = validReport.replace(
+    '  - `plugins/example-plugin/skills/a/SKILL.md:10`',
+    '  - `plugins/example-plugin/skills/a/SKILL.md:10-12`\n  - `plugins/example-plugin/skills/a/SKILL.md:20,24`\n  - 参考 `https://example.com:8443/x` 这一条'
+  );
+  const result = parseAuditReport(withRange);
+
+  assert.equal(result.reviewFindings, 1);
+  assert.deepEqual(result.findings[0].evidence, [
+    'plugins/example-plugin/skills/a/SKILL.md:10-12',
+    'plugins/example-plugin/skills/a/SKILL.md:20,24'
+  ]);
+});
+
 const chineseReportV2 = validReport
   .replace('audit_version: 1', 'audit_version: 2')
   .replace('# Plugin Semantic Audit', '# 插件语义审计')
