@@ -167,10 +167,19 @@ jobs:
             echo "root=$APP_DIR" >> "$GITHUB_OUTPUT"
           fi
 
+      # 插件只有一处来源：客户端自带那一份（安装根 plugins/ 下）。测试要的是「装好之后的样子」，
+      # 所以把上面那份夹具铺成客户端自带的那一份，而不是另开一条「测试专用」的定位入口。
+      - name: Materialize the plugin as the client-bundled copy
+        run: |
+          root="${{ steps.test-root.outputs.root }}"
+          dest="$root/plugins/mastergo-wpf-transcoder"
+          mkdir -p "$dest"
+          cp -R "${{ github.workspace }}/runtime-plugin/plugins/mastergo-wpf-transcoder/." "$dest/"
+          test -f "$dest/skills/mastergo-to-wpf/SKILL.md"
+
       - name: Run unit tests
         env:
           ROOT: ${{ steps.test-root.outputs.root }}
-          MASTERGO_PLUGIN_ROOT: ${{ github.workspace }}/runtime-plugin/plugins/mastergo-wpf-transcoder
         run: |
           cd "$ROOT"
           npm ci --ignore-scripts
@@ -180,7 +189,6 @@ jobs:
       - name: Run coverage gate
         env:
           ROOT: ${{ steps.test-root.outputs.root }}
-          MASTERGO_PLUGIN_ROOT: ${{ github.workspace }}/runtime-plugin/plugins/mastergo-wpf-transcoder
         run: |
           # 管道会把 npm 的退出码换成 tee 的：没有 pipefail，覆盖率不达标也会显示成功。
           set -o pipefail
