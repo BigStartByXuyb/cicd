@@ -136,8 +136,118 @@ test('rejects a BLOCK finding without high confidence', () => {
   assert.throws(() => parseAuditReport(report), /BLOCK finding must have high confidence/);
 });
 
+// 自由作答（没有 front matter、也没有那四个小节）仍然整份拒绝：那不是报告。
+// 缺 front matter 本身不再判 INVALID —— 正文的真值是 findings，摘要按它反推（见下面几条用例）。
 test('rejects malformed audit output', () => {
-  assert.throws(() => parseAuditReport('# free-form answer'), /front matter/);
+  assert.throws(() => parseAuditReport('# free-form answer'), /audit report is missing/);
+});
+
+/*
+ * 真实回归（应用套件 PR #51 连续两次 CI 变红）：模型漏写 front matter。
+ * 那只是摘要缺失：按 findings 反推 result 与条数，并在 notes 里写明这处偏差。
+ */
+test('derives the summary when the front matter is missing', () => {
+  const withoutFrontMatter = validReport.slice(validReport.indexOf('# Plugin Semantic Audit'));
+  const result = parseAuditReport(withoutFrontMatter);
+
+  assert.equal(result.result, 'REVIEW');
+  assert.equal(result.reviewFindings, 1);
+  assert.match(result.notes.join('\n'), /缺 front matter/);
+});
+
+// 一级标题同上：小节已经把套件认出来了，漏标题只记一条备注。
+test('accepts a report without the suite heading', () => {
+  const result = parseAuditReport(validReport.replace('# Plugin Semantic Audit\n', ''));
+
+  assert.equal(result.result, 'REVIEW');
+  assert.match(result.notes.join('\n'), /缺一级标题/);
+});
+
+/*
+ * 证据缺失：BLOCK 必须有可查的位置（没证据的阻断不能采信）；
+ * REVIEW 照收并标 evidenceMissing —— 让人自己看缺哪一条，而不是整轮 CI 判 INVALID。
+ */
+test('keeps a review finding that forgot its evidence, but still requires evidence on a block', () => {
+  const noEvidence = validReport.replace('  - `plugins/example-plugin/skills/a/SKILL.md:10`\n', '');
+  const result = parseAuditReport(noEvidence);
+
+  assert.equal(result.reviewFindings, 1);
+  assert.equal(result.findings[0].evidenceMissing, true);
+  assert.match(result.notes.join('\n'), /没有给出代码位置/);
+
+  const blocking = validReport
+    .replace('result: REVIEW', 'result: BLOCK')
+    .replace('blocking_findings: 0', 'blocking_findings: 1')
+    .replace('review_findings: 1', 'review_findings: 0')
+    .replace('### [REVIEW-001]', '### [BLOCK-001]')
+    .replace('- Severity: `REVIEW`', '- Severity: `BLOCK`')
+    .replace('- Confidence: `medium`', '- Confidence: `high`')
+    .replace('  - `plugins/example-plugin/skills/a/SKILL.md:10`\n', '');
+  assert.throws(() => parseAuditReport(blocking), /must contain evidence/);
+});
+
+// front matter 与正文条数不一致时按正文计：采信摘要会把「写了 BLOCK 却声称 0 条」悄悄放过去。
+test('counts findings from the body when the front matter disagrees', () => {
+  const result = parseAuditReport(validReport.replace('review_findings: 1', 'review_findings: 9'));
+
+  assert.equal(result.reviewFindings, 1);
+  assert.match(result.notes.join('\n'), /review_findings=9/);
+});
+
+// 版本号写错也一样：按正文认版本（v2 正文用中文小节名），记一条备注，不判整份 INVALID。
+test('falls back to the body when the front matter states an unknown audit_version', () => {
+  const result = parseAuditReport(validReport.replace('audit_version: 1', 'audit_version: 3'));
+
+  assert.equal(result.result, 'REVIEW');
+  assert.match(result.notes.join('\n'), /audit_version=3/);
+});
+
+/*
+ * 真实回归（应用套件 PR #51 连续第三次变红）：模型把 `result:` 写成小写 `block`。
+ * 摘要的大小写不是语义 —— 归一之后照常按正文反推；认不出来的写法也只记一条备注。
+ */
+test('normalises the result field case and notes an unrecognised result word', () => {
+  const lower = parseAuditReport(validReport.replace('result: REVIEW', 'result: review'));
+  assert.equal(lower.result, 'REVIEW');
+  assert.match(lower.notes.join('\n'), /result=review 按大写归一/);
+
+  const unknown = parseAuditReport(validReport.replace('result: REVIEW', 'result: 看情况'));
+  assert.equal(unknown.result, 'REVIEW');
+  assert.match(unknown.notes.join('\n'), /result=看情况 不在 PASS\/REVIEW\/BLOCK\/INVALID 里/);
+});
+
+/*
+ * 真实回归（同一次 PR 的另一条报告）：模型把 finding 标题写成 `### REVIEW-001`（没方括号）。
+ * 只认带方括号的写法会把整条 finding 丢掉 —— 摘要说 4 条、正文 0 条，而且写在标题里的 BLOCK 会被
+ * 当成「没有阻断」直接放行。两种写法都必须算一条 finding。
+ */
+test('reads a finding heading with or without brackets', () => {
+  const bare = validReport.replace('### [REVIEW-001]', '### REVIEW-001');
+  assert.equal(parseAuditReport(bare).reviewFindings, 1);
+
+  // 大写 H3 也一样（模型偶尔用 `###`→`####` 之外的排版习惯）；这里只验不丢 finding。
+  const lowerTitle = validReport.replace('### [REVIEW-001] ', '### [REVIEW-001]  ');
+  assert.equal(parseAuditReport(lowerTitle).reviewFindings, 1);
+});
+
+/*
+ * 真实回归（应用套件 PR #51 又一次变红）：模型漏写 `- Confidence:`，旧实现整份判 INVALID。
+ * 与漏写证据同类：记一条备注照收；BLOCK 仍必须 high（下面这条断言照旧）。
+ */
+test('keeps a finding that forgot its confidence, but still requires high confidence on a block', () => {
+  const dropped = validReport.replace(/^- Confidence:.*\n/m, '');
+  const result = parseAuditReport(dropped);
+
+  assert.equal(result.reviewFindings, 1);
+  assert.match(result.notes.join('\n'), /没写 Confidence/);
+
+  const blocking = dropped
+    .replace('result: REVIEW', 'result: BLOCK')
+    .replace('blocking_findings: 0', 'blocking_findings: 1')
+    .replace('review_findings: 1', 'review_findings: 0')
+    .replace('### [REVIEW-001]', '### [BLOCK-001]')
+    .replace('- Severity: `REVIEW`', '- Severity: `BLOCK`');
+  assert.throws(() => parseAuditReport(blocking), /must have high confidence/);
 });
 
 // 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词

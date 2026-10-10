@@ -13,6 +13,15 @@ function arg(name) {
   return index >= 0 ? process.argv[index + 1] : null;
 }
 
+/*
+ * 报告格式偏差（缺 front matter、缺一级标题、finding 漏证据……）不判 INVALID，但要让人看见：
+ * 接在报告正文后面，随报告一起进 PR 评论与产物。
+ */
+function withFormatNotes(markdown, notes) {
+  if (!notes || notes.length === 0) return markdown;
+  return [markdown.trimEnd(), '', '## 报告格式偏差（CI 自动记录）', '', ...notes.map((note) => `- ${note}`), ''].join('\n');
+}
+
 const reportPath = arg('--input');
 if (!reportPath) throw new Error('--input is required');
 
@@ -31,7 +40,7 @@ if (outputJsonPath) fs.writeFileSync(outputJsonPath, `${JSON.stringify(result, n
 const outputMarkdownPath = arg('--output-markdown');
 if (outputMarkdownPath) {
   const raw = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, 'utf8') : '# 应用语义审计\n\n- 没有产出报告。\n';
-  fs.writeFileSync(outputMarkdownPath, result.markdown ?? raw);
+  fs.writeFileSync(outputMarkdownPath, withFormatNotes(result.markdown ?? raw, result.notes));
 }
 
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

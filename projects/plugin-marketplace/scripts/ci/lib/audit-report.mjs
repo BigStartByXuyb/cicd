@@ -1,6 +1,8 @@
 const RESULTS = new Set(['PASS', 'REVIEW', 'BLOCK', 'INVALID']);
 const SEVERITIES = new Set(['BLOCK', 'REVIEW']);
 const AUDIT_VERSIONS = new Set(['1', '2']);
+/* 各套件报告的一级标题：写了**别的套件**的标题说明模型套错了契约 —— 那要拒，不能只记备注。 */
+const SUITE_TITLES = ['# 插件语义审计', '# 应用语义审计', '# Plugin Semantic Audit'];
 const HAN_PATTERN = /\p{Script=Han}/u;
 /*
  * 证据 = 反引号里带行号的引用。接受的写法：
@@ -64,7 +66,9 @@ function parseFrontMatter(markdown) {
       break;
     }
   }
-  throw new Error('audit report is missing front matter');
+  // 没有 front matter 不再整份判 INVALID：报告的真值是它写了哪些 finding，front matter 只是那份摘要 ——
+  // 缺了就按 findings 反推（见 parseAuditReport），并在备注里说明，人能看到这处偏差。
+  return null;
 }
 
 function parseInteger(value, field) {
@@ -80,17 +84,31 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   const documentText = normalizeAuditDocument(markdown);
   const normalizedMarkdown = normalizeAuditMarkdown(markdown);
   const frontMatter = parseFrontMatter(documentText);
-  const result = frontMatter.result;
-  if (!RESULTS.has(result)) throw new Error('result must be PASS, REVIEW, BLOCK, or INVALID');
-  const auditVersion = String(frontMatter.audit_version);
-  if (!AUDIT_VERSIONS.has(auditVersion)) throw new Error('unsupported audit_version');
+  const notes = [];
+  if (!frontMatter) notes.push('报告缺 front matter：result 与条数按 findings 反推');
+  // 没有 front matter 时按正文认版本：v2 的报告正文用中文小节名，v1（插件套件）用英文。
+  const hasV2Body = /^## (摘要|问题)/m.test(documentText);
+  const statedVersion = frontMatter?.audit_version === undefined ? null : String(frontMatter.audit_version);
+  // 版本号写错/写了个没见过的值（模型偶尔写成 3 或 "v2"）不判整份 INVALID：按正文认版本，记一条备注。
+  const auditVersion = statedVersion !== null && AUDIT_VERSIONS.has(statedVersion) ? statedVersion : hasV2Body ? '2' : '1';
+  if (statedVersion !== null && statedVersion !== auditVersion) {
+    notes.push(`front matter 的 audit_version=${statedVersion} 不是已知版本：按正文认作 v${auditVersion}`);
+  }
+  const suiteTitle = auditVersion === '2' ? title : '# Plugin Semantic Audit';
   const requiredSections = auditVersion === '2'
-    ? [title, '## 摘要', '## 问题', '## 非阻断观察', '## 审计限制']
-    : ['# Plugin Semantic Audit', '## Summary', '## Findings', '## Non-blocking observations', '## Audit limitations'];
+    ? ['## 摘要', '## 问题', '## 非阻断观察', '## 审计限制']
+    : ['## Summary', '## Findings', '## Non-blocking observations', '## Audit limitations'];
 
-  const blockingFindings = parseInteger(frontMatter.blocking_findings, 'blocking_findings');
-  const reviewFindings = parseInteger(frontMatter.review_findings, 'review_findings');
-  const changedPlugins = Array.isArray(frontMatter.changed_plugins) ? frontMatter.changed_plugins : [];
+  const changedPlugins = Array.isArray(frontMatter?.changed_plugins) ? frontMatter.changed_plugins : [];
+  /*
+   * 一级标题：漏写只是格式细节（小节已经把套件认出来了）——记一条备注；
+   * 但写成别的套件的标题说明模型套错了契约，那要当场拒。
+   */
+  if (!documentText.includes(suiteTitle)) {
+    const otherSuite = SUITE_TITLES.find((candidate) => candidate !== suiteTitle && documentText.includes(candidate));
+    if (otherSuite) throw new Error(`audit report uses another suite's heading: ${otherSuite}`);
+    notes.push(`报告缺一级标题 ${suiteTitle}（按报告正文采信）`);
+  }
   for (const section of requiredSections) {
     if (!documentText.includes(section)) throw new Error(`audit report is missing ${section}`);
   }
@@ -102,9 +120,12 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   }
 
   const findings = [];
-  // 标题是给人读的：`### [REVIEW-001]` 后面漏写标题仍是一条 finding ——
-  // 判 INVALID 的是语义问题（枚举冲突 / 缺证据 / 计数不符……），不是标题写没写。
-  const headings = [...documentText.matchAll(/^### \[((?:BLOCK|REVIEW)-\d+)\](.*)$/gm)];
+  /*
+   * 标题是给人读的：`### [REVIEW-001] 标题` 与 `### REVIEW-001` 都是**一条 finding**（模型时写时不写方括号）。
+   * 只认带方括号的那种会把整条 finding 静默丢掉 —— 那不只是少报一条复核：写在标题里的 BLOCK 会被当成
+   * 「一条阻断都没有」，门禁就白过了。判 INVALID 的是语义问题（枚举冲突 / 缺证据 / 计数不符……），不是标题的排版。
+   */
+  const headings = [...documentText.matchAll(/^###[ \t]*\[?((?:BLOCK|REVIEW)-\d+)\]?[ \t]*(.*)$/gim)];
   for (let index = 0; index < headings.length; index += 1) {
     const start = headings[index].index;
     const end = headings[index + 1]?.index ?? documentText.length;
@@ -130,23 +151,63 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
     const confidence = field(['Confidence', '置信度']);
     const scope = field(['Scope', '范围']) || null;
     const evidence = [...block.matchAll(EVIDENCE_PATTERN)].map((match) => match[1]);
-    if (!confidence) throw new Error('finding confidence is missing');
+    /*
+     * 漏写 Confidence 与漏写证据同类：格式偏差，记一条备注照收 —— 整份判 INVALID 会把语义问题换成排版问题。
+     * BLOCK 那一条仍照下面的断言拦（没写 confidence 就不是 high）。
+     */
+    if (!confidence) notes.push(`finding ${id} 没写 Confidence：按未知置信度记`);
     if (severity === 'BLOCK' && confidence !== 'high') {
       throw new Error('BLOCK finding must have high confidence');
     }
-    if (evidence.length === 0) throw new Error('finding must contain evidence');
+    /*
+     * 证据是复核的价值所在，但「漏写证据」是格式偏差、不是结论矛盾：
+     * BLOCK 仍然必须给出可查的位置（没证据的阻断不能采信），REVIEW 照收并标出来，让人自己看缺哪一条。
+     */
+    if (evidence.length === 0) {
+      if (severity === 'BLOCK') throw new Error('BLOCK finding must contain evidence');
+      notes.push(`finding ${id} 没有给出代码位置（证据缺失）`);
+    }
     if (auditVersion === '2' && !HAN_PATTERN.test(block)) {
       throw new Error('version 2 finding must contain Simplified Chinese prose');
     }
-    findings.push({ id, title, severity, category, confidence, scope, evidence });
+    findings.push({ id, title, severity, category, confidence, scope, evidence, evidenceMissing: evidence.length === 0 });
   }
 
   const actualBlocking = findings.filter((finding) => finding.severity === 'BLOCK').length;
   const actualReview = findings.filter((finding) => finding.severity === 'REVIEW').length;
-  if (actualBlocking !== blockingFindings || actualReview !== reviewFindings) {
-    throw new Error('finding counts do not match front matter');
+  /*
+   * 条数与结果以 findings 为准：front matter 与正文不一致时（模型常写错条数）只记一条备注并采信正文 ——
+   * 采信摘要会把「写了 BLOCK 却声称 0 条」这种自相矛盾悄悄放过去。
+   */
+  const statedBlocking = frontMatter?.blocking_findings === undefined
+    ? null
+    : parseInteger(frontMatter.blocking_findings, 'blocking_findings');
+  const statedReview = frontMatter?.review_findings === undefined ? null : parseInteger(frontMatter.review_findings, 'review_findings');
+  if (statedBlocking !== null && statedBlocking !== actualBlocking) {
+    notes.push(`front matter 的 blocking_findings=${statedBlocking} 与正文的 ${actualBlocking} 条不一致：按正文计`);
   }
-  if (result === 'BLOCK' && blockingFindings === 0) throw new Error('BLOCK result requires blocking findings');
+  if (statedReview !== null && statedReview !== actualReview) {
+    notes.push(`front matter 的 review_findings=${statedReview} 与正文的 ${actualReview} 条不一致：按正文计`);
+  }
+  /*
+   * front matter 是模型写的摘要，正文的 findings 才是真值：值写成小写（`block`）这类写法按大写归一，
+   * 认不出来的写法同样只记一条备注 —— 摘要字段不该把整份报告判成 INVALID（那会把语义问题换成格式问题）。
+   */
+  const statedRaw = frontMatter?.result;
+  const statedResult = statedRaw === undefined ? undefined : String(statedRaw).trim().toUpperCase();
+  if (statedResult !== undefined && !RESULTS.has(statedResult)) {
+    notes.push(`front matter 的 result=${statedRaw} 不在 PASS/REVIEW/BLOCK/INVALID 里：按正文反推`);
+  }
+  else if (statedResult !== undefined && statedResult !== statedRaw) {
+    notes.push(`front matter 的 result=${statedRaw} 按大写归一：${statedResult}`);
+  }
+  const derivedResult = actualBlocking > 0 ? 'BLOCK' : findings.length > 0 ? 'REVIEW' : 'PASS';
+  if (statedResult !== undefined && RESULTS.has(statedResult) && statedResult !== derivedResult) {
+    // PASS/REVIEW 之间不算矛盾（都是「没有阻断」）；BLOCK 与 findings 冲突才算。
+    const conflicts = derivedResult === 'BLOCK' || statedResult === 'BLOCK';
+    if (conflicts) notes.push(`front matter 的 result=${statedResult} 与正文的 ${derivedResult} 不一致：按正文计`);
+  }
+  const result = derivedResult;
 
-  return { result, blockingFindings, reviewFindings, changedPlugins, findings, markdown: normalizedMarkdown };
+  return { result, blockingFindings: actualBlocking, reviewFindings: actualReview, changedPlugins, findings, notes, markdown: normalizedMarkdown };
 }
