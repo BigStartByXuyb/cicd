@@ -120,9 +120,12 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   }
 
   const findings = [];
-  // 标题是给人读的：`### [REVIEW-001]` 后面漏写标题仍是一条 finding ——
-  // 判 INVALID 的是语义问题（枚举冲突 / 缺证据 / 计数不符……），不是标题写没写。
-  const headings = [...documentText.matchAll(/^### \[((?:BLOCK|REVIEW)-\d+)\](.*)$/gm)];
+  /*
+   * 标题是给人读的：`### [REVIEW-001] 标题` 与 `### REVIEW-001` 都是**一条 finding**（模型时写时不写方括号）。
+   * 只认带方括号的那种会把整条 finding 静默丢掉 —— 那不只是少报一条复核：写在标题里的 BLOCK 会被当成
+   * 「一条阻断都没有」，门禁就白过了。判 INVALID 的是语义问题（枚举冲突 / 缺证据 / 计数不符……），不是标题的排版。
+   */
+  const headings = [...documentText.matchAll(/^###[ \t]*\[?((?:BLOCK|REVIEW)-\d+)\]?[ \t]*(.*)$/gim)];
   for (let index = 0; index < headings.length; index += 1) {
     const start = headings[index].index;
     const end = headings[index + 1]?.index ?? documentText.length;

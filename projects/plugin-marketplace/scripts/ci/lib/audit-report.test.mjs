@@ -216,6 +216,20 @@ test('normalises the result field case and notes an unrecognised result word', (
   assert.match(unknown.notes.join('\n'), /result=看情况 不在 PASS\/REVIEW\/BLOCK\/INVALID 里/);
 });
 
+/*
+ * 真实回归（同一次 PR 的另一条报告）：模型把 finding 标题写成 `### REVIEW-001`（没方括号）。
+ * 只认带方括号的写法会把整条 finding 丢掉 —— 摘要说 4 条、正文 0 条，而且写在标题里的 BLOCK 会被
+ * 当成「没有阻断」直接放行。两种写法都必须算一条 finding。
+ */
+test('reads a finding heading with or without brackets', () => {
+  const bare = validReport.replace('### [REVIEW-001]', '### REVIEW-001');
+  assert.equal(parseAuditReport(bare).reviewFindings, 1);
+
+  // 大写 H3 也一样（模型偶尔用 `###`→`####` 之外的排版习惯）；这里只验不丢 finding。
+  const lowerTitle = validReport.replace('### [REVIEW-001] ', '### [REVIEW-001]  ');
+  assert.equal(parseAuditReport(lowerTitle).reviewFindings, 1);
+});
+
 // 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词
 // （medium / non-blocking）或漏掉反引号，旧实现直接抛出 'finding severity is invalid' → 整份报告判 INVALID，
 // 而报告自己的 front matter 明明是 `blocking_findings: 0`。kind 由 finding ID 前缀决定，字段只作人读。
