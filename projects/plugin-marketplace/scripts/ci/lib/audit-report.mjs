@@ -182,12 +182,20 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   if (statedReview !== null && statedReview !== actualReview) {
     notes.push(`front matter 的 review_findings=${statedReview} 与正文的 ${actualReview} 条不一致：按正文计`);
   }
-  const statedResult = frontMatter?.result;
+  /*
+   * front matter 是模型写的摘要，正文的 findings 才是真值：值写成小写（`block`）这类写法按大写归一，
+   * 认不出来的写法同样只记一条备注 —— 摘要字段不该把整份报告判成 INVALID（那会把语义问题换成格式问题）。
+   */
+  const statedRaw = frontMatter?.result;
+  const statedResult = statedRaw === undefined ? undefined : String(statedRaw).trim().toUpperCase();
   if (statedResult !== undefined && !RESULTS.has(statedResult)) {
-    throw new Error('result must be PASS, REVIEW, BLOCK, or INVALID');
+    notes.push(`front matter 的 result=${statedRaw} 不在 PASS/REVIEW/BLOCK/INVALID 里：按正文反推`);
+  }
+  else if (statedResult !== undefined && statedResult !== statedRaw) {
+    notes.push(`front matter 的 result=${statedRaw} 按大写归一：${statedResult}`);
   }
   const derivedResult = actualBlocking > 0 ? 'BLOCK' : findings.length > 0 ? 'REVIEW' : 'PASS';
-  if (statedResult !== undefined && statedResult !== derivedResult) {
+  if (statedResult !== undefined && RESULTS.has(statedResult) && statedResult !== derivedResult) {
     // PASS/REVIEW 之间不算矛盾（都是「没有阻断」）；BLOCK 与 findings 冲突才算。
     const conflicts = derivedResult === 'BLOCK' || statedResult === 'BLOCK';
     if (conflicts) notes.push(`front matter 的 result=${statedResult} 与正文的 ${derivedResult} 不一致：按正文计`);

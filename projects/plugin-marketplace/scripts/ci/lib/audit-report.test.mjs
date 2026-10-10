@@ -202,6 +202,20 @@ test('falls back to the body when the front matter states an unknown audit_versi
   assert.match(result.notes.join('\n'), /audit_version=3/);
 });
 
+/*
+ * 真实回归（应用套件 PR #51 连续第三次变红）：模型把 `result:` 写成小写 `block`。
+ * 摘要的大小写不是语义 —— 归一之后照常按正文反推；认不出来的写法也只记一条备注。
+ */
+test('normalises the result field case and notes an unrecognised result word', () => {
+  const lower = parseAuditReport(validReport.replace('result: REVIEW', 'result: review'));
+  assert.equal(lower.result, 'REVIEW');
+  assert.match(lower.notes.join('\n'), /result=review 按大写归一/);
+
+  const unknown = parseAuditReport(validReport.replace('result: REVIEW', 'result: 看情况'));
+  assert.equal(unknown.result, 'REVIEW');
+  assert.match(unknown.notes.join('\n'), /result=看情况 不在 PASS\/REVIEW\/BLOCK\/INVALID 里/);
+});
+
 // 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词
 // （medium / non-blocking）或漏掉反引号，旧实现直接抛出 'finding severity is invalid' → 整份报告判 INVALID，
 // 而报告自己的 front matter 明明是 `blocking_findings: 0`。kind 由 finding ID 前缀决定，字段只作人读。

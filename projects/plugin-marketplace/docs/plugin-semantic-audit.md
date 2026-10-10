@@ -87,7 +87,7 @@ Every finding must use exactly one category and one severity:
 
 ## Required Markdown report
 
-Claude must return exactly one report with this front matter and section order. The order is fixed: front matter first (`---` … `---`), then the suite heading, then the four sections; every finding's `Evidence` must list `` `path:line` `` code locations. A missing front matter or a missing suite heading is recorded as a format deviation (the parser derives result and counts from the findings) instead of failing the whole run; a report carrying **another suite's** heading, or a `BLOCK` finding without evidence, still fails closed.
+Claude must return exactly one report with this front matter and section order. The order is fixed: front matter first (`---` … `---`), then the suite heading, then the four sections; every finding's `Evidence` must list `` `path:line` `` code locations. A missing front matter, a missing suite heading, or a `result:` value spelled differently (lowercase `block`, an unknown word) is recorded as a format deviation — the parser derives result and counts from the findings — instead of failing the whole run; a report carrying **another suite's** heading, or a `BLOCK` finding without evidence, still fails closed.
 
 ```markdown
 ---
@@ -129,7 +129,7 @@ changed_plugins:
 使用简体中文列出缺失上下文、未解析引用或不确定结论。没有时写 `None`。
 ```
 
-The parser must verify the front matter, result enum, counts, changed plugin list, heading order, finding IDs (the ID prefix carries the finding kind), category enums, and evidence paths. Version 2 reports must use the Chinese headings above and Chinese human-readable prose. Version 1 reports remain readable for historical artifacts. The parser must fail closed when the report is malformed, missing evidence, or contains a `BLOCK` finding whose confidence is not `high`. Field *formatting* is not a contract: `- Severity:` / `- Category:` / `- Confidence:` / `- Scope:` values may be backquoted or bare, and a missing or non-enum `- Severity:` does not invalidate the report (the ID prefix decides the kind). What still fails closed is a field that contradicts the ID prefix.
+The parser must verify the front matter, counts, changed plugin list, heading order, finding IDs (the ID prefix carries the finding kind), category enums, and evidence paths. Version 2 reports must use the Chinese headings above and Chinese human-readable prose. Version 1 reports remain readable for historical artifacts. The parser must fail closed when the report is malformed, missing evidence, or contains a `BLOCK` finding whose confidence is not `high`. Field *formatting* is not a contract: `- Severity:` / `- Category:` / `- Confidence:` / `- Scope:` values may be backquoted or bare, a missing or non-enum `- Severity:` does not invalidate the report (the ID prefix decides the kind), and the summary `result:` value is normalised and checked against the body (an unrecognised word is a note, the findings decide). What still fails closed is a field that contradicts the ID prefix, or a `BLOCK` finding without evidence.
 
 ## CI interpretation
 
