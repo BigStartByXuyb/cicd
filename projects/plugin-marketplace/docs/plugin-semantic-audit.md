@@ -85,7 +85,7 @@ Every finding must use exactly one category and one severity:
 
 ## Required Markdown report
 
-Claude must return exactly one report with this front matter and section order:
+Claude must return exactly one report with this front matter and section order. The order is fixed: front matter first (`---` … `---`), then the suite heading, then the four sections; every finding's `Evidence` must list `` `path:line` `` code locations. A missing front matter or a missing suite heading is recorded as a format deviation (the parser derives result and counts from the findings) instead of failing the whole run; a report carrying **another suite's** heading, or a `BLOCK` finding without evidence, still fails closed.
 
 ```markdown
 ---

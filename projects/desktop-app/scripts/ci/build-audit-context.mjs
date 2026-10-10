@@ -29,7 +29,14 @@ const rangeArgs = range ? [range.from, range.to] : [];
 const rangeLabel = range ? range.label : '（无法解析变更范围）';
 const nameStatus = rangeArgs.length > 0 ? runGit(gitRoot, ['diff', '--name-status', ...rangeArgs]).trim() : '';
 const diffstat = rangeArgs.length > 0 ? runGit(gitRoot, ['diff', '--stat', ...rangeArgs]).trim() : '';
-const diff = rangeArgs.length > 0 ? (runGit(gitRoot, ['diff', ...rangeArgs], { allowFailure: true }) ?? '') : '';
+/*
+ * 生成产物与依赖目录不进 diff：它们体积大（打包后的单行 JS 动辄几百 KB）、内容完全由源码决定，
+ * 逐行审没有意义；更实际的问题是，一把它们塞进上下文，diff 就超过内联上限，模型只能去读那个巨大的
+ * patch 文件、只读得下一小截，报告随之漏段走形。改名清单（name-status / stat）照旧列全部文件。
+ */
+const DIFF_EXCLUDES = [':(exclude)public/assets', ':(exclude)dist', ':(exclude)vendor', ':(exclude)node_modules'];
+const diffArgs = rangeArgs.length > 0 ? [...rangeArgs, '--', '.', ...DIFF_EXCLUDES] : [];
+const diff = diffArgs.length > 0 ? (runGit(gitRoot, ['diff', ...diffArgs], { allowFailure: true }) ?? '') : '';
 
 const changedFiles = nameStatus
   .split('\n')
@@ -85,6 +92,8 @@ const context = [
   `- 工作区：${root}`,
   `- 审计范围：${rangeLabel}`,
   `- 变更文件数：${changedFiles.length}`,
+  '- diff 已排除生成产物与依赖目录（`public/assets`、`dist`、`vendor`、`node_modules`）：'
+    + '它们由源码生成，不逐行审；改名清单与文件索引仍然列出全部变更。',
   '',
   '## git diff --name-status',
   '',

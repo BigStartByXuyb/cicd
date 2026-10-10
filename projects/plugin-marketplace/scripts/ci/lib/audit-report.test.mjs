@@ -136,8 +136,62 @@ test('rejects a BLOCK finding without high confidence', () => {
   assert.throws(() => parseAuditReport(report), /BLOCK finding must have high confidence/);
 });
 
+// 自由作答（没有 front matter、也没有那四个小节）仍然整份拒绝：那不是报告。
+// 缺 front matter 本身不再判 INVALID —— 正文的真值是 findings，摘要按它反推（见下面几条用例）。
 test('rejects malformed audit output', () => {
-  assert.throws(() => parseAuditReport('# free-form answer'), /front matter/);
+  assert.throws(() => parseAuditReport('# free-form answer'), /audit report is missing/);
+});
+
+/*
+ * 真实回归（应用套件 PR #51 连续两次 CI 变红）：模型漏写 front matter。
+ * 那只是摘要缺失：按 findings 反推 result 与条数，并在 notes 里写明这处偏差。
+ */
+test('derives the summary when the front matter is missing', () => {
+  const withoutFrontMatter = validReport.slice(validReport.indexOf('# Plugin Semantic Audit'));
+  const result = parseAuditReport(withoutFrontMatter);
+
+  assert.equal(result.result, 'REVIEW');
+  assert.equal(result.reviewFindings, 1);
+  assert.match(result.notes.join('\n'), /缺 front matter/);
+});
+
+// 一级标题同上：小节已经把套件认出来了，漏标题只记一条备注。
+test('accepts a report without the suite heading', () => {
+  const result = parseAuditReport(validReport.replace('# Plugin Semantic Audit\n', ''));
+
+  assert.equal(result.result, 'REVIEW');
+  assert.match(result.notes.join('\n'), /缺一级标题/);
+});
+
+/*
+ * 证据缺失：BLOCK 必须有可查的位置（没证据的阻断不能采信）；
+ * REVIEW 照收并标 evidenceMissing —— 让人自己看缺哪一条，而不是整轮 CI 判 INVALID。
+ */
+test('keeps a review finding that forgot its evidence, but still requires evidence on a block', () => {
+  const noEvidence = validReport.replace('  - `plugins/example-plugin/skills/a/SKILL.md:10`\n', '');
+  const result = parseAuditReport(noEvidence);
+
+  assert.equal(result.reviewFindings, 1);
+  assert.equal(result.findings[0].evidenceMissing, true);
+  assert.match(result.notes.join('\n'), /没有给出代码位置/);
+
+  const blocking = validReport
+    .replace('result: REVIEW', 'result: BLOCK')
+    .replace('blocking_findings: 0', 'blocking_findings: 1')
+    .replace('review_findings: 1', 'review_findings: 0')
+    .replace('### [REVIEW-001]', '### [BLOCK-001]')
+    .replace('- Severity: `REVIEW`', '- Severity: `BLOCK`')
+    .replace('- Confidence: `medium`', '- Confidence: `high`')
+    .replace('  - `plugins/example-plugin/skills/a/SKILL.md:10`\n', '');
+  assert.throws(() => parseAuditReport(blocking), /must contain evidence/);
+});
+
+// front matter 与正文条数不一致时按正文计：采信摘要会把「写了 BLOCK 却声称 0 条」悄悄放过去。
+test('counts findings from the body when the front matter disagrees', () => {
+  const result = parseAuditReport(validReport.replace('review_findings: 1', 'review_findings: 9'));
+
+  assert.equal(result.reviewFindings, 1);
+  assert.match(result.notes.join('\n'), /review_findings=9/);
 });
 
 // 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词

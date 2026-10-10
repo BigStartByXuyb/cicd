@@ -68,6 +68,12 @@
 
 ## 报告格式
 
+**输出的顺序固定**：先写 front matter（`---` 包住 `audit_version` / `result` / `blocking_findings` /
+`review_findings` / `changed_projects`），紧接着写一级标题 `# 应用语义审计`，再写那四个小节。
+每条 finding 的 `Evidence` 必须是 `` `路径:行号` `` 形式的代码位置。
+（缺 front matter 或漏标题时 CI 不判 INVALID：会按正文的 findings 反推结果与条数，并把偏差记在报告末尾；
+但**写成别的套件的标题**、或 BLOCK 不给证据，仍会被拒。）
+
 ````text
 ---
 audit_version: 2

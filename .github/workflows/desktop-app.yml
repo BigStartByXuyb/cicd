@@ -215,7 +215,9 @@ jobs:
             ${{ runner.temp }}/ui-coverage.txt
 
   semantic-audit:
-    needs: deterministic-validation
+    # 这一步要下载 runtime-tests 上传的覆盖率产物（audit-context 把它拼进上下文）：
+    # 不等它跑完就取，会拿到「Artifact not found」——审计于是在没有覆盖率的情况下静默跑一整轮。
+    needs: [deterministic-validation, runtime-tests]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
