@@ -151,7 +151,11 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
     const confidence = field(['Confidence', '置信度']);
     const scope = field(['Scope', '范围']) || null;
     const evidence = [...block.matchAll(EVIDENCE_PATTERN)].map((match) => match[1]);
-    if (!confidence) throw new Error('finding confidence is missing');
+    /*
+     * 漏写 Confidence 与漏写证据同类：格式偏差，记一条备注照收 —— 整份判 INVALID 会把语义问题换成排版问题。
+     * BLOCK 那一条仍照下面的断言拦（没写 confidence 就不是 high）。
+     */
+    if (!confidence) notes.push(`finding ${id} 没写 Confidence：按未知置信度记`);
     if (severity === 'BLOCK' && confidence !== 'high') {
       throw new Error('BLOCK finding must have high confidence');
     }

@@ -230,6 +230,26 @@ test('reads a finding heading with or without brackets', () => {
   assert.equal(parseAuditReport(lowerTitle).reviewFindings, 1);
 });
 
+/*
+ * 真实回归（应用套件 PR #51 又一次变红）：模型漏写 `- Confidence:`，旧实现整份判 INVALID。
+ * 与漏写证据同类：记一条备注照收；BLOCK 仍必须 high（下面这条断言照旧）。
+ */
+test('keeps a finding that forgot its confidence, but still requires high confidence on a block', () => {
+  const dropped = validReport.replace(/^- Confidence:.*\n/m, '');
+  const result = parseAuditReport(dropped);
+
+  assert.equal(result.reviewFindings, 1);
+  assert.match(result.notes.join('\n'), /没写 Confidence/);
+
+  const blocking = dropped
+    .replace('result: REVIEW', 'result: BLOCK')
+    .replace('blocking_findings: 0', 'blocking_findings: 1')
+    .replace('review_findings: 1', 'review_findings: 0')
+    .replace('### [REVIEW-001]', '### [BLOCK-001]')
+    .replace('- Severity: `REVIEW`', '- Severity: `BLOCK`');
+  assert.throws(() => parseAuditReport(blocking), /must have high confidence/);
+});
+
 // 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词
 // （medium / non-blocking）或漏掉反引号，旧实现直接抛出 'finding severity is invalid' → 整份报告判 INVALID，
 // 而报告自己的 front matter 明明是 `blocking_findings: 0`。kind 由 finding ID 前缀决定，字段只作人读。
