@@ -88,8 +88,12 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   if (!frontMatter) notes.push('报告缺 front matter：result 与条数按 findings 反推');
   // 没有 front matter 时按正文认版本：v2 的报告正文用中文小节名，v1（插件套件）用英文。
   const hasV2Body = /^## (摘要|问题)/m.test(documentText);
-  const auditVersion = String(frontMatter?.audit_version ?? (hasV2Body ? '2' : '1'));
-  if (!AUDIT_VERSIONS.has(auditVersion)) throw new Error('unsupported audit_version');
+  const statedVersion = frontMatter?.audit_version === undefined ? null : String(frontMatter.audit_version);
+  // 版本号写错/写了个没见过的值（模型偶尔写成 3 或 "v2"）不判整份 INVALID：按正文认版本，记一条备注。
+  const auditVersion = statedVersion !== null && AUDIT_VERSIONS.has(statedVersion) ? statedVersion : hasV2Body ? '2' : '1';
+  if (statedVersion !== null && statedVersion !== auditVersion) {
+    notes.push(`front matter 的 audit_version=${statedVersion} 不是已知版本：按正文认作 v${auditVersion}`);
+  }
   const suiteTitle = auditVersion === '2' ? title : '# Plugin Semantic Audit';
   const requiredSections = auditVersion === '2'
     ? ['## 摘要', '## 问题', '## 非阻断观察', '## 审计限制']

@@ -194,6 +194,14 @@ test('counts findings from the body when the front matter disagrees', () => {
   assert.match(result.notes.join('\n'), /review_findings=9/);
 });
 
+// 版本号写错也一样：按正文认版本（v2 正文用中文小节名），记一条备注，不判整份 INVALID。
+test('falls back to the body when the front matter states an unknown audit_version', () => {
+  const result = parseAuditReport(validReport.replace('audit_version: 1', 'audit_version: 3'));
+
+  assert.equal(result.result, 'REVIEW');
+  assert.match(result.notes.join('\n'), /audit_version=3/);
+});
+
 // 真实回归（plugin-marketplace PR #7 连续 4 轮 CI 变红）：模型把 `- Severity:` 写成 human 等级词
 // （medium / non-blocking）或漏掉反引号，旧实现直接抛出 'finding severity is invalid' → 整份报告判 INVALID，
 // 而报告自己的 front matter 明明是 `blocking_findings: 0`。kind 由 finding ID 前缀决定，字段只作人读。
