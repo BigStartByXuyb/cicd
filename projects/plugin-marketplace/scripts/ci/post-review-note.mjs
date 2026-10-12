@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 
-import { upsertPrComment } from '../../../../shared/ci/github-pr-comment.mjs';
+import { REVIEW_MARKERS, resolveReviewTarget, upsertReviewNote } from '../../../../shared/ci/review-note.mjs';
 
-// 把最终报告贴到 PR 上（有则更新）。用法：node post-pr-comment.mjs --input <json> [--dry-run]
+// 把最终报告贴到 PR/MR 上（有则更新）。用法：node post-review-note.mjs --input <json> [--dry-run]
 
 function arg(name) {
   const index = process.argv.indexOf(name);
@@ -17,11 +17,9 @@ if (process.argv.includes('--dry-run')) {
   process.exit(0);
 }
 
-const result = await upsertPrComment({
-  token: process.env.GITHUB_TOKEN,
-  repository: process.env.GITHUB_REPOSITORY,
-  pullRequestNumber: process.env.PR_NUMBER,
-  marker: 'bigstart-app-ci-report',
+const result = await upsertReviewNote({
+  ...resolveReviewTarget(),
+  marker: REVIEW_MARKERS.pluginMarketplace,
   markdown: input.markdown
 });
 process.stdout.write(`${JSON.stringify(result)}\n`);

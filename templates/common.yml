@@ -1,0 +1,57 @@
+# 两个套件（插件市场 / 应用）共用的骨架：阶段、触发策略、变更集变量、CI 实现的取法。
+#
+# 调用方在自己的 .gitlab-ci.yml 里 include 本文件 + 所用套件的模板，三处 ref 必须是同一个 commit：
+#   include:
+#     - project: data_ai/cicd
+#       ref: <commit>
+#       file: /templates/common.yml
+#     - project: data_ai/cicd
+#       ref: <commit>
+#       file: /templates/plugin-marketplace.yml
+#   variables:
+#     CI_IMPL_REF: <同一个 commit>
+#
+# 调用方不要再声明 stages 与 workflow：两处声明会在合并时互相覆盖。
+# 运行环境假定：Linux runner + Docker executor；runner 能出公网（装 claude-code、调 DeepSeek、调飞书）；
+# cicd 项目允许调用方的 CI_JOB_TOKEN 读取（Settings → CI/CD → Job token permissions）。
+
+stages: [validate, test, audit, report, notify, release]
+
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+variables:
+  # 报告要看 base..head 的差异，浅克隆取不到 base。
+  GIT_DEPTH: "0"
+  # 报告与审计上下文放这里：作为 artifacts 在 job 之间传递。
+  CI_TMP: "$CI_PROJECT_DIR/.ci-tmp"
+  # CI 实现（cicd 仓库）按被 include 的那个 commit 取一份脚本，模板与脚本同源。
+  CI_IMPL_DIR: "$CI_PROJECT_DIR/.ci-impl"
+  CI_IMPL_PROJECT: "data_ai/cicd"
+  CI_IMPL_REF: "$CI_COMMIT_SHA"
+  NODE_IMAGE: "node:22"
+  PWSH_IMAGE: "mcr.microsoft.com/powershell:lts-ubuntu-22.04"
+  # 变更集：MR 用差异基，分支推送用推送前的那一个 commit（首次推送是全零，脚本会回退到父提交）。
+  BASE_SHA: "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}"
+  HEAD_SHA: "$CI_COMMIT_SHA"
+
+.ci-setup:
+  before_script:
+    - mkdir -p "$CI_TMP"
+    - |
+      if [ ! -d "$CI_IMPL_DIR/.git" ]; then
+        host_port="${CI_SERVER_URL#*://}"
+        git clone --quiet "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${host_port}/${CI_IMPL_PROJECT}.git" "$CI_IMPL_DIR"
+      fi
+      git -C "$CI_IMPL_DIR" checkout --quiet "$CI_IMPL_REF"
+      echo "CI 实现：${CI_IMPL_PROJECT}@$(git -C "$CI_IMPL_DIR" rev-parse --short HEAD)"
+
+.ci-node:
+  extends: .ci-setup
+  image: $NODE_IMAGE
+  interruptible: true

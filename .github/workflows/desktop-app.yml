@@ -469,7 +469,7 @@ jobs:
           REPORT_DIR: ${{ runner.temp }}/final-report
         run: |
           node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const dir=process.env.REPORT_DIR; const files=fs.existsSync(dir)?fs.readdirSync(dir).map(f=>path.join(dir,f)):[]; const md=files.find(f=>f.endsWith('.md')); const markdown=md?fs.readFileSync(md,'utf8'):'# 应用 CI/CD 报告\n\n- 最终报告未生成'; fs.writeFileSync(process.env.INPUT_PATH, JSON.stringify({markdown}));"
-          node "$CI_PROJECT_DIR/scripts/ci/post-pr-comment.mjs" --input "$INPUT_PATH"
+          node "$CI_PROJECT_DIR/scripts/ci/post-review-note.mjs" --input "$INPUT_PATH"
 
   notify-feishu:
     needs: [deterministic-validation, semantic-audit, runtime-tests, final-report, publish-pr-report]

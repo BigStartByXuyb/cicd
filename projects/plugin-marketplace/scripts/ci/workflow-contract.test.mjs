@@ -64,8 +64,9 @@ test('caller passes exactly the required secret names', () => {
     // 没检出调用方仓库：只在这里跳过，其余断言仍读本仓库的 reusable workflow。
     return;
   }
-  const block = caller.match(/\n\s+secrets:\n([\s\S]*?)(?=\n\S|$)/)?.[1] ?? '';
-  const actual = [...block.matchAll(/^\s{6}([A-Z0-9_]+):/gm)].map((m) => m[1]);
+  // 调用方仓库的行尾由各自平台决定：两种行尾都要认。
+  const block = caller.match(/\r?\n\s+secrets:\r?\n([\s\S]*?)(?=\r?\n\S|$)/)?.[1] ?? '';
+  const actual = [...block.matchAll(/^ {6}([A-Z0-9_]+):/gm)].map((m) => m[1]);
   assert.deepEqual(actual, names);
   assert.doesNotMatch(caller, /secrets:\s*inherit/);
 });

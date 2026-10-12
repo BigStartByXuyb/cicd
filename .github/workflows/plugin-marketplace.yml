@@ -427,7 +427,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: node "$CI_PROJECT_DIR/scripts/ci/post-github-pr-comment.mjs" --input "$RUNNER_TEMP/pr-comment.json"
+        run: node "$CI_PROJECT_DIR/scripts/ci/post-review-note.mjs" --input "$RUNNER_TEMP/pr-comment.json"
 
   notify-feishu:
     needs: [deterministic-validation, semantic-audit, final-report, publish-pr-report]

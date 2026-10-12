@@ -53,7 +53,7 @@ Organization Secrets；调用 workflow 和传参格式保持不变。
 - `projects/plugin-marketplace/scripts/ci/parse-plugin-audit-report.mjs`：解析固定 Markdown 报告，并输出结构化语义报告。
 - `projects/plugin-marketplace/scripts/ci/build-deterministic-report.mjs`：将结构检查结果转换为 JSON/Markdown 报告。
 - `projects/plugin-marketplace/scripts/ci/build-final-report.mjs`：汇总结构检查和语义审计为唯一最终报告。
-- `projects/plugin-marketplace/scripts/ci/post-github-pr-comment.mjs`：创建或更新 PR 评论。
+- `projects/plugin-marketplace/scripts/ci/post-review-note.mjs`：创建或更新 PR 评论（GitLab 侧同一份实现写 MR 评论）。
 - `projects/plugin-marketplace/scripts/ci/notify-feishu.mjs`：汇总 CI 状态并向飞书收件人发送通知。
 
 ## 3. 工作流结构

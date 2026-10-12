@@ -1,0 +1,170 @@
+# 应用 CI/CD（模块）：结构与配置检查 + 构建产物一致 → 运行时测试与覆盖率门禁 → 语义审计 → 汇总
+# → MR 评论 → 飞书通知。与 templates/common.yml 一起被调用方 include，本文件只放 job 定义。
+#
+# 需要的 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 app-cicd 环境，
+# 这样只有声明了 environment: app-cicd 的 job 才拿得到）：
+#   ANTHROPIC_API_KEY / FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID
+#   FEISHU_RECIPIENT_MAP_JSON / GITLAB_API_TOKEN
+# 收件人映射表的键是 GitLab 用户名。
+
+variables:
+  CI_SUITE: "$CI_IMPL_DIR/projects/desktop-app"
+  # 运行时测试用的插件夹具：插件只有一处来源，取市场仓库的默认分支。
+  CI_PLUGIN_DIR: "$CI_PROJECT_DIR/.ci-plugin-fixture"
+  CI_PLUGIN_PROJECT: "data_ai/plugins"
+
+# 机械可判定的检查 + 构建产物与源码一致：不需要密钥，也不执行仓库里的任意代码。
+app:deterministic:
+  extends: .ci-node
+  stage: validate
+  script:
+    - node "$CI_SUITE/scripts/ci/check-app-structure.mjs" --root "$CI_PROJECT_DIR" --output "$CI_TMP/deterministic-report.json" --markdown "$CI_TMP/deterministic-report.md"
+    # 前端产物是入库的：改了源码忘了重新构建，在仓库里看不出来，在用户那里就是旧界面。
+    - cd "$CI_PROJECT_DIR"
+    - npm ci --ignore-scripts
+    - npm --prefix ui ci --ignore-scripts
+    - npm run build:ui
+    - |
+      if ! git diff --quiet -- public; then
+        echo "public/ 与源码不匹配：本地跑 npm run build:ui 后一起提交。"
+        git --no-pager diff --stat -- public
+        exit 1
+      fi
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 真的把用例跑一遍并卡覆盖率阈值。执行的是仓库里的代码，所以不挂密钥环境。
+app:runtime-tests:
+  extends: .ci-node
+  stage: test
+  script:
+    - |
+      if [ ! -d "$CI_PLUGIN_DIR/.git" ]; then
+        host_port="${CI_SERVER_URL#*://}"
+        git clone --quiet "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${host_port}/${CI_PLUGIN_PROJECT}.git" "$CI_PLUGIN_DIR"
+      fi
+      # 测试要的是「装好之后的样子」：把夹具铺成客户端自带的那一份（安装根 plugins/ 下）。
+      dest="$CI_PROJECT_DIR/plugins/mastergo-wpf-transcoder"
+      mkdir -p "$dest"
+      cp -R "$CI_PLUGIN_DIR/plugins/mastergo-wpf-transcoder/." "$dest/"
+      test -f "$dest/skills/mastergo-to-wpf/SKILL.md"
+    - |
+      cd "$CI_PROJECT_DIR"
+      npm ci --ignore-scripts
+      npm test
+    # 覆盖率门禁：阈值写在 package.json 的 test:coverage 里（口径与数值都在仓库内可查）。
+    # 管道会把 npm 的退出码换成 tee 的：没有 pipefail，覆盖率不达标也会显示成功。
+    - |
+      set -o pipefail
+      cd "$CI_PROJECT_DIR"
+      npm run test:coverage 2>&1 | tee "$CI_TMP/coverage.txt"
+    - |
+      set -o pipefail
+      cd "$CI_PROJECT_DIR/ui"
+      npm ci --ignore-scripts
+      npm run test:coverage 2>&1 | tee "$CI_TMP/ui-coverage.txt"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 语义审计：覆盖率产物由前一阶段带过来，拼进审计上下文。
+# 审计没产出可用报告时按 INVALID 记（下游汇总据此判），不能落成 PASS。
+app:semantic-audit:
+  extends: .ci-node
+  stage: audit
+  when: always
+  environment: app-cicd
+  variables:
+    ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
+    CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
+  script:
+    - |
+      if [ -z "${ANTHROPIC_API_KEY:-}" ]; then echo "缺少 ANTHROPIC_API_KEY：仓库还没配置语义审计用的密钥（DeepSeek 的 Anthropic 兼容端点）。"; exit 1; fi
+    - npm install --global @anthropic-ai/claude-code@2.1.263
+    - |
+      coverage_args=""
+      if [ -f "$CI_TMP/coverage.txt" ] || [ -f "$CI_TMP/ui-coverage.txt" ]; then
+        cat "$CI_TMP/coverage.txt" "$CI_TMP/ui-coverage.txt" 2>/dev/null > "$CI_TMP/coverage-all.txt"
+        coverage_args="--coverage-report $CI_TMP/coverage-all.txt"
+      fi
+      node "$CI_SUITE/scripts/ci/build-audit-context.mjs" \
+        --root "$CI_PROJECT_DIR" \
+        --git-root "$CI_PROJECT_DIR" \
+        --base "$BASE_SHA" \
+        --head "$HEAD_SHA" \
+        --output "$CI_TMP/audit-context.md" \
+        --diff-output "$CI_TMP/audit-diff.patch" \
+        $coverage_args
+    - |
+      set +e
+      cd "$CI_PROJECT_DIR"
+      claude --bare --no-session-persistence --permission-prompts none \
+        --tools "Read" \
+        --add-dir "$CI_TMP" \
+        --output-format text \
+        --model claude-sonnet-4-6 \
+        -p "$(cat "$CI_SUITE/docs/app-semantic-audit.md")" \
+        < "$CI_TMP/audit-context.md" > "$CI_TMP/audit-report.md" 2> "$CI_TMP/audit-cli.log"
+      status=$?
+      set -e
+      if [ "$status" -ne 0 ]; then echo "claude 退出码 $status；CLI 日志："; cat "$CI_TMP/audit-cli.log" || true; fi
+    - |
+      node "$CI_SUITE/scripts/ci/parse-app-audit-report.mjs" \
+        --input "$CI_TMP/audit-report.md" \
+        --output-json "$CI_TMP/semantic-report.json" \
+        --output-markdown "$CI_TMP/semantic-report.md" || true
+      result=$(node -e "const fs=require('node:fs');const file='$CI_TMP/semantic-report.json';console.log(fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')).result:'INVALID')")
+      echo "语义审计结论：$result"
+      cat "$CI_TMP/semantic-report.md" 2>/dev/null || true
+      if [ "$result" != "PASS" ] && [ "$result" != "REVIEW" ]; then echo "语义审计未通过：result=$result"; exit 1; fi
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+app:final-report:
+  extends: .ci-node
+  stage: report
+  when: always
+  script:
+    - |
+      args=(--output-json "$CI_TMP/final-report.json" --output-markdown "$CI_TMP/final-report.md")
+      # 运行时测试没跑到覆盖率那一步，就按「单元测试或覆盖率门禁未通过」记进汇总。
+      if [ ! -f "$CI_TMP/coverage.txt" ] && [ ! -f "$CI_TMP/ui-coverage.txt" ]; then
+        printf '{"status":"FAIL","checks":[],"findings":[{"check":"runtime-tests","path":"","line":0,"message":"单元测试或覆盖率门禁未通过"}]}\n' > "$CI_TMP/runtime-report.json"
+        args+=(--deterministic "$CI_TMP/runtime-report.json")
+      fi
+      if [ -f "$CI_TMP/deterministic-report.json" ]; then args+=(--deterministic "$CI_TMP/deterministic-report.json"); fi
+      # 审计没产出报告时按 INVALID 记，不能落成 PASS。
+      if [ ! -f "$CI_TMP/semantic-report.json" ]; then
+        printf '{"result":"INVALID","blockingFindings":0,"reviewFindings":0,"findings":[],"error":"语义审计未产出可用报告"}\n' > "$CI_TMP/semantic-invalid.json"
+        args+=(--semantic "$CI_TMP/semantic-invalid.json")
+      else
+        args+=(--semantic "$CI_TMP/semantic-report.json")
+      fi
+      if [ -f "$CI_TMP/semantic-report.md" ]; then args+=(--semantic-markdown "$CI_TMP/semantic-report.md"); fi
+      node "$CI_SUITE/scripts/ci/build-final-report.mjs" "${args[@]}"
+      cat "$CI_TMP/final-report.md"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+app:mr-note:
+  extends: .ci-node
+  stage: notify
+  when: always
+  environment: app-cicd
+  script:
+    - |
+      if [ -z "$CI_MERGE_REQUEST_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
+      node -e "const fs=require('node:fs');const file='$CI_TMP/final-report.md';const markdown=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'# 应用 CI/CD 报告\n\n- 最终报告未生成';fs.writeFileSync('$CI_TMP/note-input.json',JSON.stringify({markdown}))"
+      node "$CI_SUITE/scripts/ci/post-review-note.mjs" --input "$CI_TMP/note-input.json"
+
+app:notify-feishu:
+  extends: .ci-node
+  stage: notify
+  when: always
+  environment: app-cicd
+  script:
+    - node "$CI_SUITE/scripts/ci/build-notify-input.mjs" --findings-dir "$CI_TMP" --output "$CI_TMP/feishu-input.json"
+    - node "$CI_SUITE/scripts/ci/notify-feishu.mjs" --input "$CI_TMP/feishu-input.json"
