@@ -1,0 +1,469 @@
+name: Reusable Plugin Marketplace CI/CD
+
+on:
+  workflow_call:
+    inputs:
+      ci_ref:
+        description: 'Version tag or commit of this reusable workflow repository'
+        required: false
+        type: string
+        default: v2
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      FEISHU_APP_ID:
+        required: true
+      FEISHU_APP_SECRET:
+        required: true
+      FEISHU_DEFAULT_CHAT_ID:
+        required: true
+      FEISHU_RECIPIENT_MAP_JSON:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: plugin-cicd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  MARKETPLACE_DIR: ${{ github.workspace }}/marketplace
+  CI_PROJECT_DIR: ${{ github.workspace }}/ci/projects/plugin-marketplace
+
+jobs:
+  deterministic-validation:
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.changed-plugins.outputs.plugins }}
+    steps:
+      - name: Checkout caller marketplace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+          path: marketplace
+          persist-credentials: false
+
+      - name: Checkout CI implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cicd
+          ref: ${{ inputs.ci_ref }}
+          path: ci
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Materialize PR tree as read-only input
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.clone_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        working-directory: marketplace
+        run: |
+          git fetch --no-tags --depth=1 "$HEAD_REPOSITORY" "$HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/pr-tree"
+          git archive "$HEAD_SHA" | tar -x -C "$RUNNER_TEMP/pr-tree"
+
+      - name: Select validation root
+        id: root
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            echo "root=$RUNNER_TEMP/pr-tree" >> "$GITHUB_OUTPUT"
+          else
+            echo "root=$MARKETPLACE_DIR" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect changed plugins
+        id: changed-plugins
+        env:
+          # A tag push (and a branch's first push) reports event.before as 40 zeros,
+          # which is not a commit: collect-changed-plugins.mjs treats an all-zero or
+          # otherwise unresolvable base as "use the head commit's parent".
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        working-directory: marketplace
+        run: |
+          plugins=$(node "$CI_PROJECT_DIR/scripts/ci/collect-changed-plugins.mjs")
+          echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
+
+      - name: Validate structure and configuration
+        working-directory: marketplace
+        run: node "$CI_PROJECT_DIR/scripts/ci/validate-marketplace.mjs" --root "${{ steps.root.outputs.root }}" > "$RUNNER_TEMP/deterministic-validation.json"
+
+      - name: Build deterministic report
+        if: ${{ always() }}
+        env:
+          PLUGINS_JSON: ${{ steps.changed-plugins.outputs.plugins || '[]' }}
+        run: |
+          if [ ! -f "$RUNNER_TEMP/deterministic-validation.json" ]; then
+            printf '{"valid":false,"errors":["validation did not produce a result"],"plugins":[]}' > "$RUNNER_TEMP/deterministic-validation.json"
+          fi
+          node "$CI_PROJECT_DIR/scripts/ci/build-deterministic-report.mjs" \
+            --input "$RUNNER_TEMP/deterministic-validation.json" \
+            --plugins-json "$PLUGINS_JSON" \
+            --output-json "$RUNNER_TEMP/deterministic-report.json" \
+            --output-markdown "$RUNNER_TEMP/deterministic-report.md"
+
+      - name: Upload deterministic report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-deterministic-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/deterministic-validation.json
+            ${{ runner.temp }}/deterministic-report.json
+            ${{ runner.temp }}/deterministic-report.md
+
+  # 无 secrets 的运行时回归：把插件自带的 JS / PowerShell 测试真的跑一遍。
+  # 为什么单独一个 job：pull_request_target 的工作流带 pull-requests/issues 写权限，而这里执行的是
+  # **未受信任的 PR 代码**（测试脚本本身来自 PR），所以本 job 把权限收窄到 contents: read，且不注入任何 secrets。
+  # 确定性校验只查清单/目录/必需文件，语义审计只读不执行——两者都不能替代"测试真的跑过"。
+  runtime-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller marketplace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+          path: marketplace
+          persist-credentials: false
+
+      - name: Materialize PR tree as read-only input
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.clone_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        working-directory: marketplace
+        run: |
+          git fetch --no-tags --depth=1 "$HEAD_REPOSITORY" "$HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/pr-tree"
+          git archive "$HEAD_SHA" | tar -x -C "$RUNNER_TEMP/pr-tree"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run JavaScript plugin tests
+        run: |
+          ROOT="$MARKETPLACE_DIR"
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then ROOT="$RUNNER_TEMP/pr-tree"; fi
+          cd "$ROOT"
+          files=$(find plugins -path '*/scripts/tests/*.test.js' | sort)
+          if [ -z "$files" ]; then echo "::error title=No plugin tests found::plugins/**/scripts/tests/*.test.js 未匹配到任何用例"; exit 1; fi
+          echo "$files"
+          node --test $files
+
+      - name: Run PowerShell plugin tests
+        shell: pwsh
+        run: |
+          $root = $env:MARKETPLACE_DIR
+          if ("${{ github.event_name }}" -eq 'pull_request_target') { $root = Join-Path $env:RUNNER_TEMP 'pr-tree' }
+          Push-Location $root
+          try {
+            $files = @(Get-ChildItem 'plugins/*/skills/*/scripts/tests/*.tests.ps1' -ErrorAction SilentlyContinue)
+            if ($files.Count -eq 0) { throw 'plugins/**/scripts/tests/*.tests.ps1 未匹配到任何用例' }
+            $failed = @()
+            foreach ($file in $files) {
+              pwsh -NoProfile -File $file.FullName
+              if ($LASTEXITCODE -ne 0) { $failed += $file.Name }
+            }
+            if ($failed.Count -gt 0) { throw ('PowerShell 用例失败: ' + ($failed -join ', ')) }
+          }
+          finally { Pop-Location }
+
+  semantic-audit:
+    needs: deterministic-validation
+    if: ${{ needs.deterministic-validation.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      audit_result: ${{ steps.parse-report.outputs.result }}
+    steps:
+      - name: Checkout caller marketplace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+          path: marketplace
+          persist-credentials: false
+
+      - name: Checkout CI implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cicd
+          ref: ${{ inputs.ci_ref }}
+          path: ci
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Materialize PR tree as read-only input
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.clone_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        working-directory: marketplace
+        run: |
+          git fetch --no-tags --depth=1 "$HEAD_REPOSITORY" "$HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/pr-tree"
+          git archive "$HEAD_SHA" | tar -x -C "$RUNNER_TEMP/pr-tree"
+
+      - name: Install pinned Claude Code CLI
+        run: npm install --global @anthropic-ai/claude-code@2.1.263
+
+      - name: Build audit context
+        id: audit-context
+        env:
+          PLUGINS_JSON: ${{ needs.deterministic-validation.outputs.plugins }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then ROOT="$RUNNER_TEMP/pr-tree"; else ROOT="$MARKETPLACE_DIR"; fi
+          echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+          plugin_args=()
+          while IFS= read -r plugin; do plugin_args+=(--plugin "$plugin"); done < <(node -e "for (const p of JSON.parse(process.env.PLUGINS_JSON)) console.log(p)")
+          node "$CI_PROJECT_DIR/scripts/ci/build-audit-context.mjs" \
+            --root "$ROOT" \
+            --git-root "$MARKETPLACE_DIR" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --contract-root "$CI_PROJECT_DIR" \
+            --output "$RUNNER_TEMP/audit-context.md" \
+            --diff-output "$RUNNER_TEMP/audit-diff.patch" \
+            "${plugin_args[@]}"
+
+      - name: Run DeepSeek-backed Claude audit
+        id: claude-audit
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: '1'
+          AUDIT_ROOT: ${{ steps.audit-context.outputs.root }}
+        run: |
+          if [ ! -d "$AUDIT_ROOT" ]; then
+            echo "::error title=Audit workspace missing::$AUDIT_ROOT does not exist"
+            exit 1
+          fi
+          set +e
+          cd "$AUDIT_ROOT"
+          claude --bare --no-session-persistence --permission-prompts none \
+            --tools "Read,Grep,Glob" \
+            --add-dir "$RUNNER_TEMP" \
+            --output-format text \
+            --model claude-sonnet-4-6 \
+            -p "$(cat "$CI_PROJECT_DIR/docs/plugin-semantic-audit.md")" \
+            < "$RUNNER_TEMP/audit-context.md" > "$RUNNER_TEMP/audit-report.md" 2> "$RUNNER_TEMP/audit-cli.log"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=Claude audit CLI failed::claude exited with code $status. See the CLI log below and the audit-context-cli artifact."
+          fi
+          cat "$RUNNER_TEMP/audit-cli.log" || true
+          exit "$status"
+
+      - name: Parse audit report
+        id: parse-report
+        # 被取消（同 PR 有更高优先级的新运行）时不要解析：此时 audit-report.md 是空的，
+        # 照旧解析只会产出一条「missing front matter」的假 INVALID，并被下游的汇总/评论发出去。
+        if: ${{ !cancelled() }}
+        env:
+          SEMANTIC_REPORT: ${{ runner.temp }}/semantic-report.json
+        run: |
+          set +e
+          node "$CI_PROJECT_DIR/scripts/ci/parse-plugin-audit-report.mjs" \
+            --input "$RUNNER_TEMP/audit-report.md" \
+            --output-json "$RUNNER_TEMP/semantic-report.json" \
+            --output-markdown "$RUNNER_TEMP/semantic-report.md"
+          parse_exit=$?
+          result=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.result ?? 'INVALID')")
+          blocking=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.blockingFindings ?? 0)")
+          review=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.reviewFindings ?? 0)")
+          if [ "$result" = "INVALID" ]; then
+            reason=$(node --input-type=module -e "import fs from 'node:fs'; const data=JSON.parse(fs.readFileSync(process.env.SEMANTIC_REPORT,'utf8')); console.log(data.error ?? 'unknown')")
+            preview=$(head -c 300 "$RUNNER_TEMP/audit-report.md" | tr '\n' ' ')
+            echo "::error title=Semantic audit report is invalid::$reason :: report preview: $preview"
+          fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "blocking_findings=$blocking" >> "$GITHUB_OUTPUT"
+          echo "review_findings=$review" >> "$GITHUB_OUTPUT"
+          exit $parse_exit
+
+      - name: Upload audit report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-semantic-audit-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/audit-report.md
+            ${{ runner.temp }}/audit-context.md
+            ${{ runner.temp }}/audit-diff.patch
+            ${{ runner.temp }}/audit-cli.log
+            ${{ runner.temp }}/semantic-report.json
+            ${{ runner.temp }}/semantic-report.md
+
+  final-report:
+    needs: [deterministic-validation, semantic-audit]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      decision: ${{ steps.aggregate.outputs.decision }}
+      blocking_findings: ${{ steps.aggregate.outputs.blocking_findings }}
+      review_findings: ${{ steps.aggregate.outputs.review_findings }}
+    steps:
+      - name: Checkout CI implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cicd
+          ref: ${{ inputs.ci_ref }}
+          path: ci
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download deterministic report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-deterministic-report-*
+          path: ${{ runner.temp }}/deterministic-report
+          merge-multiple: true
+
+      - name: Download semantic report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-semantic-audit-*
+          path: ${{ runner.temp }}/semantic-report
+          merge-multiple: true
+
+      - name: Build final report
+        id: aggregate
+        env:
+          PLUGINS_JSON: ${{ needs.deterministic-validation.outputs.plugins || '[]' }}
+          REPORT: ${{ runner.temp }}/final-report.json
+        run: |
+          find_file() { find "$1" -maxdepth 2 -type f -name "$2" -print -quit 2>/dev/null || true; }
+          deterministic=$(find_file "$RUNNER_TEMP/deterministic-report" deterministic-report.json)
+          semantic=$(find_file "$RUNNER_TEMP/semantic-report" semantic-report.json)
+          semantic_markdown=$(find_file "$RUNNER_TEMP/semantic-report" semantic-report.md)
+          args=(--plugins-json "$PLUGINS_JSON" --output-json "$RUNNER_TEMP/final-report.json" --output-markdown "$RUNNER_TEMP/final-report.md")
+          if [ -n "$deterministic" ]; then args+=(--deterministic "$deterministic"); fi
+          if [ -n "$semantic" ]; then args+=(--semantic "$semantic"); fi
+          if [ -n "$semantic_markdown" ]; then args+=(--semantic-markdown "$semantic_markdown"); fi
+          node "$CI_PROJECT_DIR/scripts/ci/build-final-report.mjs" "${args[@]}"
+          decision=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')).decision)" )
+          blocking=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')).checks.semantic.blockingFindings)" )
+          review=$(node --input-type=module -e "import fs from 'node:fs'; console.log(JSON.parse(fs.readFileSync(process.env.REPORT,'utf8')).checks.semantic.reviewFindings)" )
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
+          echo "blocking_findings=$blocking" >> "$GITHUB_OUTPUT"
+          echo "review_findings=$review" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/final-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload final report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-final-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/final-report.json
+            ${{ runner.temp }}/final-report.md
+
+  publish-pr-report:
+    needs: final-report
+    if: ${{ !cancelled() && github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CI implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cicd
+          ref: ${{ inputs.ci_ref }}
+          path: ci
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download final report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-final-report-*
+          path: ${{ runner.temp }}/final-report
+          merge-multiple: true
+
+      - name: Build PR comment input
+        env:
+          REPORT_DIR: ${{ runner.temp }}/final-report
+          INPUT_PATH: ${{ runner.temp }}/pr-comment.json
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; import path from 'node:path'; const report=fs.existsSync(process.env.REPORT_DIR) ? fs.readdirSync(process.env.REPORT_DIR).map(f=>path.join(process.env.REPORT_DIR,f)).find(f=>f.endsWith('.md')) : null; const markdown=report ? fs.readFileSync(report,'utf8') : '# Plugin CI/CD Report\\n\\n- 最终报告未生成'; fs.writeFileSync(process.env.INPUT_PATH, JSON.stringify({markdown}));"
+
+      - name: Create or update PR comment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node "$CI_PROJECT_DIR/scripts/ci/post-github-pr-comment.mjs" --input "$RUNNER_TEMP/pr-comment.json"
+
+  notify-feishu:
+    needs: [deterministic-validation, semantic-audit, final-report, publish-pr-report]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CI implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cicd
+          ref: ${{ inputs.ci_ref }}
+          path: ci
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build Feishu notification input
+        env:
+          INPUT_PATH: ${{ runner.temp }}/feishu-input.json
+          DETERMINISTIC_RESULT: ${{ needs.deterministic-validation.result }}
+          SEMANTIC_RESULT: ${{ needs.semantic-audit.result }}
+          AUDIT_RESULT: ${{ needs.semantic-audit.outputs.audit_result }}
+          FINAL_DECISION: ${{ needs.final-report.outputs.decision }}
+          BLOCKING_FINDINGS: ${{ needs.final-report.outputs.blocking_findings || '0' }}
+          REVIEW_FINDINGS: ${{ needs.final-report.outputs.review_findings || '0' }}
+          PLUGINS_JSON: ${{ needs.deterministic-validation.outputs.plugins || '[]' }}
+        run: |
+          node --input-type=module -e "import fs from 'node:fs'; const e=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8')); const pr=e.pull_request; const reviewers=(pr?.requested_reviewers ?? []).map(u=>u.login).filter(Boolean); const input={repository:process.env.GITHUB_REPOSITORY,pullRequestNumber:pr?.number ?? 0,pullRequestTitle:pr?.title ?? 'Default branch pipeline',commitSha:process.env.GITHUB_SHA,authorLogin:pr?.user?.login ?? 'unknown',reviewerLogins:reviewers,changedPlugins:JSON.parse(process.env.PLUGINS_JSON),deterministicResult:process.env.DETERMINISTIC_RESULT,semanticResult:process.env.SEMANTIC_RESULT,auditResult:process.env.AUDIT_RESULT || null,finalDecision:process.env.FINAL_DECISION || 'UNKNOWN',blockingFindings:Number(process.env.BLOCKING_FINDINGS || 0),reviewFindings:Number(process.env.REVIEW_FINDINGS || 0),reportUrl:process.env.GITHUB_SERVER_URL+'/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID}; fs.writeFileSync(process.env.INPUT_PATH,JSON.stringify(input));"
+
+      - name: Send Feishu notification
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_DEFAULT_CHAT_ID: ${{ secrets.FEISHU_DEFAULT_CHAT_ID }}
+          FEISHU_RECIPIENT_MAP_JSON: ${{ secrets.FEISHU_RECIPIENT_MAP_JSON }}
+        run: node "$CI_PROJECT_DIR/scripts/ci/notify-feishu.mjs" --input "$RUNNER_TEMP/feishu-input.json"

@@ -1,0 +1,3 @@
+# Changes to the reusable workflow and project CI must be reviewed by the CI owner.
+/.github/workflows/ @BigStartByXuyb
+/projects/ @BigStartByXuyb
