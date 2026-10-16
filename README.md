@@ -1,60 +1,26 @@
-# BigStart CI/CD
+# MW 插件系统 CI/CD
 
-This repository hosts reusable GitHub Actions workflows for multiple projects.
+MW 插件系统共享流水线仓库，包含插件市场与桌面客户端的 GitLab CI 模板、GitHub Actions 工作流和校验脚本。
 
-The reusable workflow supports two deployment modes. For the current personal
-account pilot, the caller repository stores five repository-level Actions
-Secrets and passes them explicitly through `workflow_call`. For team use,
-both repositories can later move into one GitHub Organization and the same
-names can be supplied as allow-listed Organization Secrets. Secret values
-never live in this repository.
+## GitLab CI
 
-## Layout
+调用仓库在根目录 `.gitlab-ci.yml` 中引用本仓库模板：
 
-```text
-.github/workflows/                 # GitHub requires reusable workflows here
-  plugin-marketplace.yml            # entry point for plugin marketplace
-  desktop-app.yml                   # entry point for desktop/client apps
-projects/
-  plugin-marketplace/               # one complete CI/CD suite
-    scripts/ci/
-    docs/
-  desktop-app/                      # Node backend + React frontend clients
-    scripts/ci/
-    docs/
-shared/ci/                          # cross-suite utilities (Feishu send, PR comment)
-```
+- `templates/common.yml` 提供阶段、触发规则和共享设置。
+- `templates/plugin-marketplace.yml` 为插件市场提供检查、测试、审计、报告和通知任务。
+- `templates/desktop-app.yml` 为桌面客户端提供检查、构建、测试、审计、报告和通知任务。
 
-The desktop-app suite gates unit tests, coverage thresholds, hardcoded machine paths, orphan
-exports, layering, build-output consistency, and a DeepSeek-backed Claude semantic audit whose
-contract lives in `projects/desktop-app/docs/app-semantic-audit.md`. Callers pin `ci_ref` to a
-commit SHA so a change to the CI logic is always an explicit change on their side.
+调用仓库需要在三个位置固定同一个已审核的提交：两个 `include` 项的 `ref` 和 `CI_IMPL_REF`。共享流水线以 Linux Docker Runner 为运行环境。
 
-The marketplace repository currently calls:
+调用项目的 `CI_JOB_TOKEN` 必须获准读取本仓库。插件市场变量作用域为 `plugin-cicd`，桌面客户端变量作用域为 `app-cicd`。调用项目还需配置以下流水线变量：`ANTHROPIC_API_KEY`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_DEFAULT_CHAT_ID`、`FEISHU_RECIPIENT_MAP_JSON` 和 `GITLAB_API_TOKEN`。密钥值不存放在仓库中。
 
-```text
-BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@d71a86e97e737f8bb48fc4f999cf1e52820bc598
-```
+## GitHub Actions
 
-After the repositories are transferred to the team Organization, replace the
-owner in the caller workflow with that Organization slug and keep pinning a
-reviewed commit SHA.
+`.github/workflows/` 保留插件市场和桌面客户端的 GitHub Actions 入口；套件实现位于 `projects/`，共用实现位于 `shared/`。
 
-The reusable workflow requires these five Organization Secrets to be mapped
-explicitly by the caller:
+## 目录
 
-```text
-ANTHROPIC_API_KEY
-FEISHU_APP_ID
-FEISHU_APP_SECRET
-FEISHU_DEFAULT_CHAT_ID
-FEISHU_RECIPIENT_MAP_JSON
-```
-
-For the personal pilot, configure the five names in the caller repository
-(`BigStartByXuyb/test`) under Settings → Secrets and variables → Actions →
-Repository secrets. The old Environment `plugin-cicd-prod` in `cicd` is not a
-runtime source for a reusable workflow called by another repository. It may
-be kept temporarily, but it must not be treated as the caller's configuration.
-
-Plugin source code stays in the marketplace repository. This repository only checks out the caller repository temporarily during a run; it does not store submitted plugins.
+- `templates/`：GitLab 调用模板。
+- `projects/plugin-marketplace/`：插件市场流水线实现、校验规则和说明。
+- `projects/desktop-app/`：桌面客户端流水线实现、校验规则和说明。
+- `shared/`：两套流水线共用的报告和通知实现。
