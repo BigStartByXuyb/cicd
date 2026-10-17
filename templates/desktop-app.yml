@@ -38,6 +38,8 @@ app:deterministic:
 app:runtime-tests:
   extends: .ci-node
   stage: test
+  variables:
+    CI_INSTALL_PWSH: "true"
   script:
     - |
       if [ ! -d "$CI_PLUGIN_DIR/.git" ]; then

@@ -34,7 +34,7 @@ variables:
   CI_IMPL_DIR: "$CI_PROJECT_DIR/.ci-impl"
   CI_IMPL_PROJECT: "data_ai/cicd"
   CI_IMPL_REF: "$CI_COMMIT_SHA"
-  NODE_IMAGE: "node:22"
+  NODE_IMAGE: "node:22-bookworm"
   PWSH_IMAGE: "mcr.microsoft.com/powershell:lts-ubuntu-22.04"
   # 变更集：MR 用差异基，分支推送用推送前的那一个 commit（首次推送是全零，脚本会回退到父提交）。
   BASE_SHA: "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}"
@@ -42,6 +42,29 @@ variables:
 
 .ci-setup:
   before_script:
+    - |
+      if ! command -v git >/dev/null 2>&1; then
+        if ! command -v apt-get >/dev/null 2>&1; then
+          echo "CI image requires git and apt-get to install it" >&2
+          exit 1
+        fi
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y git
+      fi
+      if [ "${CI_INSTALL_PWSH:-false}" = "true" ] && ! command -v pwsh >/dev/null 2>&1; then
+        . /etc/os-release
+        if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "12" ]; then
+          echo "PowerShell 7 install expects Debian 12; found $ID $VERSION_ID" >&2
+          exit 1
+        fi
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y wget
+        wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
+        dpkg -i /tmp/packages-microsoft-prod.deb
+        rm -f /tmp/packages-microsoft-prod.deb
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y powershell
+      fi
     - mkdir -p "$CI_TMP"
     - |
       if [ ! -d "$CI_IMPL_DIR/.git" ]; then

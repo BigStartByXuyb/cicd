@@ -36,6 +36,8 @@ plugin:deterministic:
 plugin:runtime-js:
   extends: .ci-node
   stage: test
+  variables:
+    CI_INSTALL_PWSH: "true"
   script:
     - |
       cd "$CI_PROJECT_DIR"
