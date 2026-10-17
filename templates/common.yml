@@ -73,11 +73,13 @@ source:checkout:
       fi
       host_port="${CI_SERVER_URL#*://}"
       source_url="${CI_SERVER_PROTOCOL}://${host_port}/${CALLER_PROJECT_PATH}.git"
-      git -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" clone --quiet --no-checkout "$source_url" "$CI_CALLER_DIR"
+      job_auth="$(printf 'gitlab-ci-token:%s' "$CI_JOB_TOKEN" | base64 | tr -d '\n')"
+      git_auth_header="Authorization: Basic $job_auth"
+      git -c http.extraHeader="$git_auth_header" clone --quiet --no-checkout "$source_url" "$CI_CALLER_DIR"
       if [ -n "$CALLER_MR_IID" ]; then
-        git -C "$CI_CALLER_DIR" -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" fetch --quiet origin "refs/merge-requests/${CALLER_MR_IID}/head"
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="$git_auth_header" fetch --quiet origin "refs/merge-requests/${CALLER_MR_IID}/head"
       else
-        git -C "$CI_CALLER_DIR" -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" fetch --quiet origin "$CALLER_REF_NAME"
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="$git_auth_header" fetch --quiet origin "$CALLER_REF_NAME"
       fi
       git -C "$CI_CALLER_DIR" checkout --quiet --detach "$CALLER_COMMIT_SHA"
       actual_sha="$(git -C "$CI_CALLER_DIR" rev-parse HEAD)"
@@ -86,14 +88,15 @@ source:checkout:
         exit 1
       fi
       if [ -n "$CALLER_MR_TARGET_BRANCH" ]; then
-        git -C "$CI_CALLER_DIR" -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" fetch --quiet origin "$CALLER_MR_TARGET_BRANCH"
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="$git_auth_header" fetch --quiet origin "$CALLER_MR_TARGET_BRANCH"
       fi
       if [ -n "$CALLER_BASE_SHA" ] && [ "$CALLER_BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
         git -C "$CI_CALLER_DIR" cat-file -e "${CALLER_BASE_SHA}^{commit}"
       fi
       if [ "$CALLER_CI_SUITE" = "desktop-app" ]; then
-        git -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" clone --quiet "${CI_SERVER_PROTOCOL}://${host_port}/data_ai/plugins.git" "$CI_PLUGIN_DIR"
+        git -c http.extraHeader="$git_auth_header" clone --quiet "${CI_SERVER_PROTOCOL}://${host_port}/data_ai/plugins.git" "$CI_PLUGIN_DIR"
       fi
+      unset CI_JOB_TOKEN job_auth git_auth_header
       tar -czf "$CI_PROJECT_DIR/caller-source.tar.gz" -C "$CI_CALLER_DIR" .
       if [ "$CALLER_CI_SUITE" = "desktop-app" ]; then
         tar -czf "$CI_PROJECT_DIR/plugin-fixture.tar.gz" -C "$CI_PLUGIN_DIR" .
