@@ -34,7 +34,7 @@ variables:
   CI_IMPL_DIR: "$CI_PROJECT_DIR/.ci-impl"
   CI_IMPL_PROJECT: "data_ai/cicd"
   CI_IMPL_REF: "$CI_COMMIT_SHA"
-  NODE_IMAGE: "node:22-bookworm"
+  NODE_IMAGE: "node:22"
   PWSH_IMAGE: "mcr.microsoft.com/powershell:lts-ubuntu-22.04"
   # 变更集：MR 用差异基，分支推送用推送前的那一个 commit（首次推送是全零，脚本会回退到父提交）。
   BASE_SHA: "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}"
