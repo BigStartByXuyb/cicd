@@ -73,16 +73,13 @@ app:runtime-tests:
 # 语义审计：覆盖率产物由前一阶段带过来，拼进审计上下文。
 # 审计没产出可用报告时按 INVALID 记（下游汇总据此判），不能落成 PASS。
 app:semantic-audit:
-  extends: .ci-node
+  extends: .ci-deepseek
   stage: audit
   when: always
   environment: app-cicd
   variables:
-    ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
     CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
   script:
-    - |
-      if [ -z "${ANTHROPIC_API_KEY:-}" ]; then echo "缺少 ANTHROPIC_API_KEY：仓库还没配置语义审计用的密钥（DeepSeek 的 Anthropic 兼容端点）。"; exit 1; fi
     - npm install --global @anthropic-ai/claude-code@2.1.263
     - |
       coverage_args=""
@@ -105,7 +102,6 @@ app:semantic-audit:
         --tools "Read" \
         --add-dir "$CI_TMP" \
         --output-format text \
-        --model claude-sonnet-4-6 \
         -p "$(cat "$CI_SUITE/docs/app-semantic-audit.md")" \
         < "$CI_TMP/audit-context.md" > "$CI_TMP/audit-report.md" 2> "$CI_TMP/audit-cli.log"
       status=$?

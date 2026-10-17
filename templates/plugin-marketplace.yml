@@ -67,12 +67,11 @@ plugin:runtime-pwsh:
 # 语义审计：读上下文、调 DeepSeek 的 Anthropic 兼容端点，只读不执行仓库代码。
 # 确定性校验没过时这一关不跑（needs 决定），与调用方的门禁口径一致。
 plugin:semantic-audit:
-  extends: .ci-node
+  extends: .ci-deepseek
   stage: audit
   needs: ["plugin:deterministic"]
   environment: plugin-cicd
   variables:
-    ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
     CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
   script:
     - npm install --global @anthropic-ai/claude-code@2.1.263
@@ -97,7 +96,6 @@ plugin:semantic-audit:
         --tools "Read,Grep,Glob" \
         --add-dir "$CI_TMP" \
         --output-format text \
-        --model claude-sonnet-4-6 \
         -p "$(cat "$CI_SUITE/docs/plugin-semantic-audit.md")" \
         < "$CI_TMP/audit-context.md" > "$CI_TMP/audit-report.md" 2> "$CI_TMP/audit-cli.log"
       status=$?
