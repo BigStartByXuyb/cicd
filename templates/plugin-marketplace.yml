@@ -46,12 +46,12 @@ plugin:runtime-js:
       echo "$files"
       node --test $files
 
-# 插件自带的 PowerShell 用例：node 镜像里没有 pwsh，单独一个 job 换镜像跑。
+# 插件自带的 PowerShell 用例：在 Node 镜像里安装 PowerShell 7，测试入口同时依赖 Node 与 pwsh。
 plugin:runtime-pwsh:
-  extends: .ci-setup
-  image: $PWSH_IMAGE
+  extends: .ci-node
   stage: test
-  interruptible: true
+  variables:
+    CI_INSTALL_PWSH: "true"
   script:
     - |
       cd "$CI_PROJECT_DIR"
