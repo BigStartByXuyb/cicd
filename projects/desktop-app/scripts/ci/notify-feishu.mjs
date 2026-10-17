@@ -16,6 +16,7 @@ function arg(name) {
 const inputPath = arg('--input');
 if (!inputPath) throw new Error('--input is required');
 const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+const recipientMap = readRecipientMap(process.env.FEISHU_RECIPIENT_MAP_JSON);
 
 const status = ['PASS', 'REVIEW', 'BLOCK', 'INVALID'].includes(input.finalDecision) ? input.finalDecision : 'FAILED';
 const markdown = [
@@ -40,8 +41,10 @@ if (process.argv.includes('--dry-run')) {
 const result = await sendFeishuText({
   appId: process.env.FEISHU_APP_ID,
   appSecret: process.env.FEISHU_APP_SECRET,
-  chatId: process.env.FEISHU_DEFAULT_CHAT_ID,
-  recipientMap: readRecipientMap(process.env.FEISHU_RECIPIENT_MAP_JSON),
+  chatId: recipientMap[input.authorLogin] && (input.reviewerLogins ?? []).every((login) => recipientMap[login])
+    ? undefined
+    : process.env.FEISHU_DEFAULT_CHAT_ID,
+  recipientMap,
   authorLogin: input.authorLogin,
   reviewerLogins: input.reviewerLogins ?? [],
   markdown

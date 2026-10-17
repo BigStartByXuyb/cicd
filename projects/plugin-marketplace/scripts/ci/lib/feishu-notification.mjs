@@ -34,7 +34,7 @@ export function buildFeishuNotification(input) {
     '',
     `请审阅当前分析结果并在 PR 中反馈。审阅者：${input.reviewerLogins?.join(', ') || '未指定'}`,
     ...(input.unresolvedReviewerLogins?.length
-      ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；已通知默认维护群聊。`]
+      ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；这些审阅者未收到私信。`]
       : []),
     `查看 PR：${input.reportUrl}`,
   ].join('\n');
