@@ -1,11 +1,7 @@
 # 插件市场 CI/CD（模块）：结构与配置检查 → 运行时测试 → 语义审计 → 汇总 → MR 评论 → 飞书通知。
 # 本文件由中央 .gitlab-ci.yml 引入，只包含插件市场 job 定义。
 #
-# 需要的中央 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 plugin-cicd 环境，
-# 这样只有声明了 environment: plugin-cicd 的 job 才拿得到）：
-#   ANTHROPIC_API_KEY / FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID
-#   FEISHU_RECIPIENT_MAP_JSON / GITLAB_API_TOKEN
-# 收件人映射表的键是 GitLab 用户名。
+# 各 job 的密钥环境作用域见仓库 README。
 
 plugin:deterministic:
   extends: .ci-plugin
@@ -71,7 +67,7 @@ plugin:semantic-audit:
       artifacts: true
     - job: plugin:deterministic
       artifacts: true
-  environment: plugin-cicd
+  environment: plugin-cicd-audit
   variables:
     CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
   script:
@@ -137,7 +133,7 @@ plugin:mr-note:
   extends: .ci-plugin
   stage: notify
   when: always
-  environment: plugin-cicd
+  environment: plugin-cicd-notify
   script:
     - |
       if [ -z "$CALLER_MR_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
@@ -148,7 +144,7 @@ plugin:notify-feishu:
   extends: .ci-plugin
   stage: notify
   when: always
-  environment: plugin-cicd
+  environment: plugin-cicd-notify
   script:
     - node "$CI_SUITE/scripts/ci/build-notify-input.mjs" --findings-dir "$CI_TMP" --output "$CI_TMP/feishu-input.json"
     - node "$CI_SUITE/scripts/ci/notify-feishu.mjs" --input "$CI_TMP/feishu-input.json"

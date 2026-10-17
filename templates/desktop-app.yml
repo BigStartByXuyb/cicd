@@ -1,10 +1,6 @@
 # 应用套件：结构与构建产物检查、运行时测试、语义审计、报告与通知。
 #
-# 需要的中央 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 app-cicd 环境，
-# 这样只有声明了 environment: app-cicd 的 job 才拿得到）：
-#   ANTHROPIC_API_KEY / FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID
-#   FEISHU_RECIPIENT_MAP_JSON / GITLAB_API_TOKEN
-# 收件人映射表的键是 GitLab 用户名。
+# 各 job 的密钥环境作用域见仓库 README。
 
 app:launcher:
   extends: .ci-desktop
@@ -75,7 +71,7 @@ app:semantic-audit:
   extends: .ci-desktop-deepseek
   stage: audit
   when: always
-  environment: app-cicd
+  environment: app-cicd-audit
   variables:
     CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
   script:
@@ -150,7 +146,7 @@ app:mr-note:
   extends: .ci-desktop
   stage: notify
   when: always
-  environment: app-cicd
+  environment: app-cicd-notify
   script:
     - |
       if [ -z "$CALLER_MR_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
@@ -161,7 +157,7 @@ app:notify-feishu:
   extends: .ci-desktop
   stage: notify
   when: always
-  environment: app-cicd
+  environment: app-cicd-notify
   script:
     - node "$CI_SUITE/scripts/ci/build-notify-input.mjs" --findings-dir "$CI_TMP" --output "$CI_TMP/feishu-input.json"
     - node "$CI_SUITE/scripts/ci/notify-feishu.mjs" --input "$CI_TMP/feishu-input.json"
