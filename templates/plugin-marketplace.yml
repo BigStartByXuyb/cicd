@@ -1,23 +1,20 @@
 # 插件市场 CI/CD（模块）：结构与配置检查 → 运行时测试 → 语义审计 → 汇总 → MR 评论 → 飞书通知。
-# 与 templates/common.yml 一起被调用方 include，本文件只放 job 定义。
+# 本文件由中央 .gitlab-ci.yml 引入，只包含插件市场 job 定义。
 #
-# 需要的 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 plugin-cicd 环境，
+# 需要的中央 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 plugin-cicd 环境，
 # 这样只有声明了 environment: plugin-cicd 的 job 才拿得到）：
 #   ANTHROPIC_API_KEY / FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID
 #   FEISHU_RECIPIENT_MAP_JSON / GITLAB_API_TOKEN
 # 收件人映射表的键是 GitLab 用户名。
 
-variables:
-  CI_SUITE: "$CI_IMPL_DIR/projects/plugin-marketplace"
-
 plugin:deterministic:
-  extends: .ci-node
+  extends: .ci-plugin
   stage: validate
   script:
     - node "$CI_SUITE/scripts/ci/collect-changed-plugins.mjs" > "$CI_TMP/changed-plugins.json"
     - |
       set +e
-      node "$CI_SUITE/scripts/ci/validate-marketplace.mjs" --root "$CI_PROJECT_DIR" > "$CI_TMP/deterministic-validation.json"
+      node "$CI_SUITE/scripts/ci/validate-marketplace.mjs" --root "$CI_CALLER_DIR" > "$CI_TMP/deterministic-validation.json"
       validate_status=$?
       set -e
       # 校验没产出结果时也要有一份可汇总的输入，否则汇总会拿到空文件。
@@ -34,13 +31,13 @@ plugin:deterministic:
 
 # 无密钥的运行时回归：插件自带的 JS 用例真的跑一遍。执行的是仓库里的代码，所以不挂密钥环境。
 plugin:runtime-js:
-  extends: .ci-node
+  extends: .ci-plugin
   stage: test
   variables:
     CI_INSTALL_PWSH: "true"
   script:
     - |
-      cd "$CI_PROJECT_DIR"
+      cd "$CI_CALLER_DIR"
       files=$(find plugins -path '*/scripts/tests/*.test.js' | sort)
       if [ -z "$files" ]; then echo "plugins/**/scripts/tests/*.test.js 未匹配到任何用例"; exit 1; fi
       echo "$files"
@@ -48,13 +45,13 @@ plugin:runtime-js:
 
 # 插件自带的 PowerShell 用例：在 Node 镜像里安装 PowerShell 7，测试入口同时依赖 Node 与 pwsh。
 plugin:runtime-pwsh:
-  extends: .ci-node
+  extends: .ci-plugin
   stage: test
   variables:
     CI_INSTALL_PWSH: "true"
   script:
     - |
-      cd "$CI_PROJECT_DIR"
+      cd "$CI_CALLER_DIR"
       files=$(find plugins -path '*/skills/*/scripts/tests/*.tests.ps1' | sort)
       if [ -z "$files" ]; then echo "plugins/**/skills/*/scripts/tests/*.tests.ps1 未匹配到任何用例"; exit 1; fi
       echo "$files"
@@ -67,9 +64,13 @@ plugin:runtime-pwsh:
 # 语义审计：读上下文、调 DeepSeek 的 Anthropic 兼容端点，只读不执行仓库代码。
 # 确定性校验没过时这一关不跑（needs 决定），与调用方的门禁口径一致。
 plugin:semantic-audit:
-  extends: .ci-deepseek
+  extends: .ci-plugin-deepseek
   stage: audit
-  needs: ["plugin:deterministic"]
+  needs:
+    - job: source:checkout
+      artifacts: true
+    - job: plugin:deterministic
+      artifacts: true
   environment: plugin-cicd
   variables:
     CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
@@ -81,8 +82,8 @@ plugin:semantic-audit:
         plugin_args="$plugin_args --plugin $plugin"
       done
       node "$CI_SUITE/scripts/ci/build-audit-context.mjs" \
-        --root "$CI_PROJECT_DIR" \
-        --git-root "$CI_PROJECT_DIR" \
+        --root "$CI_CALLER_DIR" \
+        --git-root "$CI_CALLER_DIR" \
         --base "$BASE_SHA" \
         --head "$HEAD_SHA" \
         --contract-root "$CI_SUITE" \
@@ -91,7 +92,7 @@ plugin:semantic-audit:
         $plugin_args
     - |
       set +e
-      cd "$CI_PROJECT_DIR"
+      cd "$CI_CALLER_DIR"
       claude --bare --no-session-persistence --permission-prompts none \
         --tools "Read,Grep,Glob" \
         --add-dir "$CI_TMP" \
@@ -116,7 +117,7 @@ plugin:semantic-audit:
     paths: [".ci-tmp/"]
 
 plugin:final-report:
-  extends: .ci-node
+  extends: .ci-plugin
   stage: report
   when: always
   script:
@@ -133,18 +134,18 @@ plugin:final-report:
     paths: [".ci-tmp/"]
 
 plugin:mr-note:
-  extends: .ci-node
+  extends: .ci-plugin
   stage: notify
   when: always
   environment: plugin-cicd
   script:
     - |
-      if [ -z "$CI_MERGE_REQUEST_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
+      if [ -z "$CALLER_MR_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
       node -e "const fs=require('node:fs');const file='$CI_TMP/final-report.md';const markdown=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'# 插件 CI/CD 报告\n\n- 最终报告未生成';fs.writeFileSync('$CI_TMP/note-input.json',JSON.stringify({markdown}))"
       node "$CI_SUITE/scripts/ci/post-review-note.mjs" --input "$CI_TMP/note-input.json"
 
 plugin:notify-feishu:
-  extends: .ci-node
+  extends: .ci-plugin
   stage: notify
   when: always
   environment: plugin-cicd

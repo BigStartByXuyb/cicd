@@ -42,18 +42,18 @@ const semantic = readJson('semantic-report.json');
 const final = readJson('final-report.json');
 const mergeRequest = await readMergeRequest({
   apiBase: process.env.CI_API_V4_URL,
-  projectId: process.env.CI_PROJECT_ID,
-  iid: process.env.CI_MERGE_REQUEST_IID,
+  projectId: process.env.CALLER_PROJECT_ID,
+  iid: process.env.CALLER_MR_IID,
   token: process.env.GITLAB_API_TOKEN,
 });
 
 const auditResult = semantic?.result ?? null;
 const input = {
-  repository: process.env.CI_PROJECT_PATH ?? '',
-  pullRequestNumber: Number(process.env.CI_MERGE_REQUEST_IID ?? 0),
-  pullRequestTitle: mergeRequest?.title ?? process.env.CI_MERGE_REQUEST_TITLE ?? '默认分支流水线',
-  commitSha: process.env.CI_COMMIT_SHA ?? '',
-  authorLogin: mergeRequest?.author?.username ?? process.env.GITLAB_USER_LOGIN ?? 'unknown',
+  repository: process.env.CALLER_PROJECT_PATH ?? '',
+  pullRequestNumber: Number(process.env.CALLER_MR_IID ?? 0),
+  pullRequestTitle: mergeRequest?.title ?? process.env.CALLER_MR_TITLE ?? '默认分支流水线',
+  commitSha: process.env.CALLER_COMMIT_SHA ?? '',
+  authorLogin: mergeRequest?.author?.username ?? process.env.CALLER_USER_LOGIN ?? 'unknown',
   reviewerLogins: (mergeRequest?.reviewers ?? []).map((user) => user.username).filter(Boolean),
   changedPlugins: deterministic?.changedPlugins ?? [],
   deterministicResult: deterministic?.status === 'PASS' ? 'success' : 'failure',
@@ -62,7 +62,7 @@ const input = {
   finalDecision: final?.decision ?? 'UNKNOWN',
   blockingFindings: Number(final?.checks?.semantic?.blockingFindings ?? 0),
   reviewFindings: Number(final?.checks?.semantic?.reviewFindings ?? 0),
-  reportUrl: process.env.CI_PIPELINE_URL ?? '',
+  reportUrl: process.env.CALLER_PIPELINE_URL ?? '',
 };
 
 fs.writeFileSync(outputPath, `${JSON.stringify(input)}\n`);

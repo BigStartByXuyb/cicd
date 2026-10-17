@@ -1,26 +1,29 @@
-# 应用 CI/CD（模块）：结构与配置检查 + 构建产物一致 → 运行时测试与覆盖率门禁 → 语义审计 → 汇总
-# → MR 评论 → 飞书通知。与 templates/common.yml 一起被调用方 include，本文件只放 job 定义。
+# 应用套件：结构与构建产物检查、运行时测试、语义审计、报告与通知。
 #
-# 需要的 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 app-cicd 环境，
+# 需要的中央 CI/CD 变量（Settings → CI/CD → Variables，Masked；作用域挂到 app-cicd 环境，
 # 这样只有声明了 environment: app-cicd 的 job 才拿得到）：
 #   ANTHROPIC_API_KEY / FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID
 #   FEISHU_RECIPIENT_MAP_JSON / GITLAB_API_TOKEN
 # 收件人映射表的键是 GitLab 用户名。
 
-variables:
-  CI_SUITE: "$CI_IMPL_DIR/projects/desktop-app"
-  # 运行时测试用的插件夹具：插件只有一处来源，取市场仓库的默认分支。
-  CI_PLUGIN_DIR: "$CI_PROJECT_DIR/.ci-plugin-fixture"
-  CI_PLUGIN_PROJECT: "data_ai/plugins"
+app:launcher:
+  extends: .ci-desktop
+  image: golang:1.22
+  stage: test
+  script:
+    - cd "$CI_CALLER_DIR/tools/launcher"
+    - go vet ./...
+    - go test ./...
+    - GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /tmp/mastergo-transcoder.exe .
 
 # 机械可判定的检查 + 构建产物与源码一致：不需要密钥，也不执行仓库里的任意代码。
 app:deterministic:
-  extends: .ci-node
+  extends: .ci-desktop
   stage: validate
   script:
-    - node "$CI_SUITE/scripts/ci/check-app-structure.mjs" --root "$CI_PROJECT_DIR" --output "$CI_TMP/deterministic-report.json" --markdown "$CI_TMP/deterministic-report.md"
+    - node "$CI_SUITE/scripts/ci/check-app-structure.mjs" --root "$CI_CALLER_DIR" --output "$CI_TMP/deterministic-report.json" --markdown "$CI_TMP/deterministic-report.md"
     # 前端产物是入库的：改了源码忘了重新构建，在仓库里看不出来，在用户那里就是旧界面。
-    - cd "$CI_PROJECT_DIR"
+    - cd "$CI_CALLER_DIR"
     - npm ci --ignore-scripts
     - npm --prefix ui ci --ignore-scripts
     - npm run build:ui
@@ -36,34 +39,30 @@ app:deterministic:
 
 # 真的把用例跑一遍并卡覆盖率阈值。执行的是仓库里的代码，所以不挂密钥环境。
 app:runtime-tests:
-  extends: .ci-node
+  extends: .ci-desktop
   stage: test
   variables:
     CI_INSTALL_PWSH: "true"
   script:
     - |
-      if [ ! -d "$CI_PLUGIN_DIR/.git" ]; then
-        host_port="${CI_SERVER_URL#*://}"
-        git clone --quiet "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${host_port}/${CI_PLUGIN_PROJECT}.git" "$CI_PLUGIN_DIR"
-      fi
       # 测试要的是「装好之后的样子」：把夹具铺成客户端自带的那一份（安装根 plugins/ 下）。
-      dest="$CI_PROJECT_DIR/plugins/mastergo-wpf-transcoder"
+      dest="$CI_CALLER_DIR/plugins/mastergo-wpf-transcoder"
       mkdir -p "$dest"
       cp -R "$CI_PLUGIN_DIR/plugins/mastergo-wpf-transcoder/." "$dest/"
       test -f "$dest/skills/mastergo-to-wpf/SKILL.md"
     - |
-      cd "$CI_PROJECT_DIR"
+      cd "$CI_CALLER_DIR"
       npm ci --ignore-scripts
       npm test
     # 覆盖率门禁：阈值写在 package.json 的 test:coverage 里（口径与数值都在仓库内可查）。
     # 管道会把 npm 的退出码换成 tee 的：没有 pipefail，覆盖率不达标也会显示成功。
     - |
       set -o pipefail
-      cd "$CI_PROJECT_DIR"
+      cd "$CI_CALLER_DIR"
       npm run test:coverage 2>&1 | tee "$CI_TMP/coverage.txt"
     - |
       set -o pipefail
-      cd "$CI_PROJECT_DIR/ui"
+      cd "$CI_CALLER_DIR/ui"
       npm ci --ignore-scripts
       npm run test:coverage 2>&1 | tee "$CI_TMP/ui-coverage.txt"
   artifacts:
@@ -73,7 +72,7 @@ app:runtime-tests:
 # 语义审计：覆盖率产物由前一阶段带过来，拼进审计上下文。
 # 审计没产出可用报告时按 INVALID 记（下游汇总据此判），不能落成 PASS。
 app:semantic-audit:
-  extends: .ci-deepseek
+  extends: .ci-desktop-deepseek
   stage: audit
   when: always
   environment: app-cicd
@@ -88,8 +87,8 @@ app:semantic-audit:
         coverage_args="--coverage-report $CI_TMP/coverage-all.txt"
       fi
       node "$CI_SUITE/scripts/ci/build-audit-context.mjs" \
-        --root "$CI_PROJECT_DIR" \
-        --git-root "$CI_PROJECT_DIR" \
+        --root "$CI_CALLER_DIR" \
+        --git-root "$CI_CALLER_DIR" \
         --base "$BASE_SHA" \
         --head "$HEAD_SHA" \
         --output "$CI_TMP/audit-context.md" \
@@ -97,7 +96,7 @@ app:semantic-audit:
         $coverage_args
     - |
       set +e
-      cd "$CI_PROJECT_DIR"
+      cd "$CI_CALLER_DIR"
       claude --bare --no-session-persistence --permission-prompts none \
         --tools "Read" \
         --add-dir "$CI_TMP" \
@@ -121,7 +120,7 @@ app:semantic-audit:
     paths: [".ci-tmp/"]
 
 app:final-report:
-  extends: .ci-node
+  extends: .ci-desktop
   stage: report
   when: always
   script:
@@ -148,18 +147,18 @@ app:final-report:
     paths: [".ci-tmp/"]
 
 app:mr-note:
-  extends: .ci-node
+  extends: .ci-desktop
   stage: notify
   when: always
   environment: app-cicd
   script:
     - |
-      if [ -z "$CI_MERGE_REQUEST_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
+      if [ -z "$CALLER_MR_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
       node -e "const fs=require('node:fs');const file='$CI_TMP/final-report.md';const markdown=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'# 应用 CI/CD 报告\n\n- 最终报告未生成';fs.writeFileSync('$CI_TMP/note-input.json',JSON.stringify({markdown}))"
       node "$CI_SUITE/scripts/ci/post-review-note.mjs" --input "$CI_TMP/note-input.json"
 
 app:notify-feishu:
-  extends: .ci-node
+  extends: .ci-desktop
   stage: notify
   when: always
   environment: app-cicd

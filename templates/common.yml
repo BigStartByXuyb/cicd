@@ -1,39 +1,24 @@
-# 两个套件（插件市场 / 应用）共用的骨架：阶段、触发策略、变更集变量、CI 实现的取法。
-#
-# 调用方在自己的 .gitlab-ci.yml 里 include 本文件 + 所用套件的模板，三处 ref 必须是同一个 commit：
-#   include:
-#     - project: data_ai/cicd
-#       ref: <commit>
-#       file: /templates/common.yml
-#     - project: data_ai/cicd
-#       ref: <commit>
-#       file: /templates/plugin-marketplace.yml
-#   variables:
-#     CI_IMPL_REF: <同一个 commit>
-#
-# 调用方不要再声明 stages 与 workflow：两处声明会在合并时互相覆盖。
-# 运行环境假定：Linux runner + Docker executor；runner 能出公网（装 claude-code、调 DeepSeek、调飞书）；
-# cicd 项目允许调用方的 CI_JOB_TOKEN 读取（Settings → CI/CD → Job token permissions）。
+# 两个套件共用的中央下游流水线骨架。调用方只传项目、提交和套件元数据。
+# 中央 source:checkout 使用 CI_JOB_TOKEN 拉取调用方源码；调用方项目必须允许 data_ai/cicd。
 
-stages: [validate, test, audit, report, notify, release]
+stages: [source, validate, test, audit, report, notify, release]
 
 workflow:
   auto_cancel:
     on_new_commit: interruptible
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "plugin-marketplace"'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "desktop-app"'
 
 variables:
-  # 报告要看 base..head 的差异，浅克隆取不到 base。
   GIT_DEPTH: "0"
-  # 报告与审计上下文放这里：作为 artifacts 在 job 之间传递。
   CI_TMP: "$CI_PROJECT_DIR/.ci-tmp"
-  # CI 实现（cicd 仓库）按被 include 的那个 commit 取一份脚本，模板与脚本同源。
-  CI_IMPL_DIR: "$CI_PROJECT_DIR/.ci-impl"
-  CI_IMPL_PROJECT: "data_ai/cicd"
-  CI_IMPL_REF: "$CI_COMMIT_SHA"
+  CI_IMPL_DIR: "$CI_PROJECT_DIR"
+  CI_SUITE: "$CI_IMPL_DIR/projects/$CALLER_CI_SUITE"
+  CI_CALLER_DIR: "$CI_PROJECT_DIR/.ci-caller"
+  CI_PLUGIN_DIR: "$CI_PROJECT_DIR/.ci-plugin-fixture"
+  BASE_SHA: "$CALLER_BASE_SHA"
+  HEAD_SHA: "$CALLER_COMMIT_SHA"
   NODE_IMAGE: "node:22"
   ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
   ANTHROPIC_MODEL: "deepseek-flash"
@@ -41,9 +26,6 @@ variables:
   ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-flash"
   ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-flash"
   CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-flash"
-  # 变更集：MR 用差异基，分支推送用推送前的那一个 commit（首次推送是全零，脚本会回退到父提交）。
-  BASE_SHA: "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}"
-  HEAD_SHA: "$CI_COMMIT_SHA"
 
 .ci-setup:
   before_script:
@@ -71,26 +53,97 @@ variables:
         DEBIAN_FRONTEND=noninteractive apt-get install -y powershell
       fi
     - mkdir -p "$CI_TMP"
+
+source:checkout:
+  extends: .ci-setup
+  image: $NODE_IMAGE
+  stage: source
+  rules:
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app"'
+  script:
     - |
-      if [ ! -d "$CI_IMPL_DIR/.git" ]; then
-        host_port="${CI_SERVER_URL#*://}"
-        git clone --quiet "${CI_SERVER_PROTOCOL}://gitlab-ci-token:${CI_JOB_TOKEN}@${host_port}/${CI_IMPL_PROJECT}.git" "$CI_IMPL_DIR"
+      case "$CALLER_CI_SUITE:$CALLER_PROJECT_PATH" in
+        plugin-marketplace:data_ai/plugins) ;;
+        desktop-app:data_ai/mastergo-transcoder-gui) ;;
+        *) echo "不支持的套件/源码仓库组合" >&2; exit 1 ;;
+      esac
+      if ! printf '%s' "$CALLER_COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+        echo "CALLER_COMMIT_SHA 必须是完整 commit SHA" >&2
+        exit 1
       fi
-      git -C "$CI_IMPL_DIR" checkout --quiet "$CI_IMPL_REF"
-      echo "CI 实现：${CI_IMPL_PROJECT}@$(git -C "$CI_IMPL_DIR" rev-parse --short HEAD)"
+      host_port="${CI_SERVER_URL#*://}"
+      source_url="${CI_SERVER_PROTOCOL}://${host_port}/${CALLER_PROJECT_PATH}.git"
+      git -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" clone --quiet --no-checkout "$source_url" "$CI_CALLER_DIR"
+      if [ -n "$CALLER_MR_IID" ]; then
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" fetch --quiet origin "refs/merge-requests/${CALLER_MR_IID}/head"
+      else
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" fetch --quiet origin "$CALLER_REF_NAME"
+      fi
+      git -C "$CI_CALLER_DIR" checkout --quiet --detach "$CALLER_COMMIT_SHA"
+      actual_sha="$(git -C "$CI_CALLER_DIR" rev-parse HEAD)"
+      if [ "$actual_sha" != "$CALLER_COMMIT_SHA" ]; then
+        echo "取回的源码提交与调用方传入提交不一致" >&2
+        exit 1
+      fi
+      if [ -n "$CALLER_MR_TARGET_BRANCH" ]; then
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" fetch --quiet origin "$CALLER_MR_TARGET_BRANCH"
+      fi
+      if [ -n "$CALLER_BASE_SHA" ] && [ "$CALLER_BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+        git -C "$CI_CALLER_DIR" cat-file -e "${CALLER_BASE_SHA}^{commit}"
+      fi
+      if [ "$CALLER_CI_SUITE" = "desktop-app" ]; then
+        git -c http.extraHeader="JOB-TOKEN: $CI_JOB_TOKEN" clone --quiet "${CI_SERVER_PROTOCOL}://${host_port}/data_ai/plugins.git" "$CI_PLUGIN_DIR"
+      fi
+      tar -czf "$CI_PROJECT_DIR/caller-source.tar.gz" -C "$CI_CALLER_DIR" .
+      if [ "$CALLER_CI_SUITE" = "desktop-app" ]; then
+        tar -czf "$CI_PROJECT_DIR/plugin-fixture.tar.gz" -C "$CI_PLUGIN_DIR" .
+      fi
+  artifacts:
+    paths:
+      - caller-source.tar.gz
+      - plugin-fixture.tar.gz
+    expire_in: 1 day
 
 .ci-node:
   extends: .ci-setup
   image: $NODE_IMAGE
   interruptible: true
+  before_script:
+    - !reference [.ci-setup, before_script]
+    - export BASE_SHA="${CALLER_BASE_SHA:-$CALLER_PREVIOUS_SHA}"
+    - export HEAD_SHA="$CALLER_COMMIT_SHA"
+    - mkdir -p "$CI_CALLER_DIR"
+    - tar -xzf "$CI_PROJECT_DIR/caller-source.tar.gz" -C "$CI_CALLER_DIR"
+    - if [ -f "$CI_PROJECT_DIR/plugin-fixture.tar.gz" ]; then mkdir -p "$CI_PLUGIN_DIR"; tar -xzf "$CI_PROJECT_DIR/plugin-fixture.tar.gz" -C "$CI_PLUGIN_DIR"; fi
+    - unset CI_JOB_TOKEN
 
 .ci-deepseek:
   extends: .ci-node
   before_script:
-    - !reference [.ci-setup, before_script]
+    - !reference [.ci-node, before_script]
     - |
       if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
         echo "缺少 ANTHROPIC_API_KEY：仓库还没配置 DeepSeek API key。" >&2
         exit 1
       fi
       export ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_API_KEY"
+
+.plugin-suite:
+  rules:
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace"'
+
+.desktop-suite:
+  rules:
+    - if: '$CALLER_CI_SUITE == "desktop-app"'
+
+.ci-plugin:
+  extends: [.ci-node, .plugin-suite]
+
+.ci-plugin-deepseek:
+  extends: [.ci-deepseek, .plugin-suite]
+
+.ci-desktop:
+  extends: [.ci-node, .desktop-suite]
+
+.ci-desktop-deepseek:
+  extends: [.ci-deepseek, .desktop-suite]

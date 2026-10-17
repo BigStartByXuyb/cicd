@@ -1,0 +1,4 @@
+include:
+  - local: /templates/common.yml
+  - local: /templates/plugin-marketplace.yml
+  - local: /templates/desktop-app.yml
