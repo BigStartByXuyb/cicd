@@ -5,7 +5,9 @@ import { resolveFeishuRecipients } from '../../projects/plugin-marketplace/scrip
  * 只负责「拿 token → 解析收件人 → 逐条发送」，消息文案由调用方按自己的口径拼好传进来。
  */
 export async function sendFeishuText({ appId, appSecret, chatId, recipientMap = {}, authorLogin, reviewerLogins = [], markdown }) {
-  if (!appId || !appSecret || !chatId) throw new Error('FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_DEFAULT_CHAT_ID are required');
+  if (!appId || !appSecret || !chatId) {
+    return { skipped: true, reason: '未配置飞书密钥（FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID）' };
+  }
   if (!markdown) throw new Error('markdown is required');
 
   const tokenResponse = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {

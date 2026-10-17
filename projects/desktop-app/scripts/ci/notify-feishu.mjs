@@ -5,7 +5,7 @@ import { readRecipientMap, sendFeishuText } from '../../../../shared/ci/feishu-s
 /*
  * 应用 CI 的飞书通知。输入 JSON 里是本次运行的结论与仓库信息（由 workflow 拼好）。
  * 用法：node notify-feishu.mjs --input <json> [--dry-run]
- * 没有配置飞书密钥时打印跳过说明并以 0 退出（缺通知不是 CI 失败）。
+ * 缺少飞书密钥时由共用发送函数返回跳过结果。
  */
 
 function arg(name) {
@@ -37,21 +37,13 @@ if (process.argv.includes('--dry-run')) {
   process.exit(0);
 }
 
-const appId = process.env.FEISHU_APP_ID;
-const appSecret = process.env.FEISHU_APP_SECRET;
-const chatId = process.env.FEISHU_DEFAULT_CHAT_ID;
-if (!appId || !appSecret || !chatId) {
-  process.stdout.write(JSON.stringify({ skipped: true, reason: '未配置飞书密钥（FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_DEFAULT_CHAT_ID）' }) + '\n');
-  process.exit(0);
-}
-
 const result = await sendFeishuText({
-  appId,
-  appSecret,
-  chatId,
+  appId: process.env.FEISHU_APP_ID,
+  appSecret: process.env.FEISHU_APP_SECRET,
+  chatId: process.env.FEISHU_DEFAULT_CHAT_ID,
   recipientMap: readRecipientMap(process.env.FEISHU_RECIPIENT_MAP_JSON),
   authorLogin: input.authorLogin,
   reviewerLogins: input.reviewerLogins ?? [],
   markdown
 });
-process.stdout.write(`${JSON.stringify({ status, delivered: result.delivered })}\n`);
+process.stdout.write(`${JSON.stringify({ status, ...result })}\n`);

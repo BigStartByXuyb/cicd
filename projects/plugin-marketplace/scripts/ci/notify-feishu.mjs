@@ -23,4 +23,4 @@ const delivered = await sendFeishuText({
   reviewerLogins: input.reviewerLogins,
   markdown: notification.markdown
 });
-process.stdout.write(`${JSON.stringify({ status: notification.status, delivered: delivered.delivered })}\n`);
+process.stdout.write(`${JSON.stringify({ status: notification.status, ...delivered })}\n`);
