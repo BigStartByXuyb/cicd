@@ -21,11 +21,11 @@ variables:
   HEAD_SHA: "$CALLER_COMMIT_SHA"
   NODE_IMAGE: "node:22"
   ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
-  ANTHROPIC_MODEL: "deepseek-flash"
-  ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-flash"
-  ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-flash"
-  ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-flash"
-  CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-flash"
+  ANTHROPIC_MODEL: "claude-sonnet-4-6"
+  ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-sonnet-4-6"
+  ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-6"
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-sonnet-4-6"
+  CLAUDE_CODE_SUBAGENT_MODEL: "claude-sonnet-4-6"
 
 .ci-setup:
   before_script:

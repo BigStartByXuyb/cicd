@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const central = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/plugin-marketplace.yml'), 'utf8');
+const desktop = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/desktop-app.yml'), 'utf8');
+const gitlabCommon = fs.readFileSync(path.resolve(process.cwd(), 'templates/common.yml'), 'utf8');
 // 调用方仓库的 workflow：本地并排放着同级的 plugin-marketplace-worktree 时直接读；
 // 没有那份检出（例如只 clone 了 cicd 本身）就跳过调用方那几条断言 —— 缺检出不是契约失败。
 const callerPath = process.env.CALLER_WORKFLOW ?? path.resolve(process.cwd(), '..', 'plugin-marketplace-worktree/.github/workflows/plugin-cicd.yml');
@@ -17,10 +19,20 @@ test('central workflow declares every required workflow-call secret', () => {
   assert.doesNotMatch(central, /environment:\s*plugin-cicd-prod/);
 });
 
-test('semantic audit uses the current DeepSeek model through Claude Code environment settings', () => {
+test('semantic audit uses the DeepSeek Flash Anthropic alias through Claude Code environment settings', () => {
+  for (const config of [central, desktop, gitlabCommon]) {
+    for (const name of [
+      'ANTHROPIC_MODEL',
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      'CLAUDE_CODE_SUBAGENT_MODEL',
+    ]) {
+      assert.match(config, new RegExp(`${name}:\\s*['"]?claude-sonnet-4-6`));
+    }
+    assert.doesNotMatch(config, /ANTHROPIC_(?:DEFAULT_\w+_)?MODEL:\s*['"]?deepseek-flash/);
+  }
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
-  assert.match(central, /ANTHROPIC_MODEL:\s*deepseek-flash/);
-  assert.doesNotMatch(central, /--model\s+claude-sonnet-4-6/);
 });
 
 test('semantic audit reads the workspace on demand instead of inlining plugin sources', () => {
