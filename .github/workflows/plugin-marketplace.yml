@@ -253,11 +253,11 @@ jobs:
         env:
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
-          ANTHROPIC_MODEL: deepseek-flash
-          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-flash
-          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-flash
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash
-          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-flash
+          ANTHROPIC_MODEL: claude-sonnet-4-6
+          ANTHROPIC_DEFAULT_OPUS_MODEL: claude-sonnet-4-6
+          ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-sonnet-4-6
+          CLAUDE_CODE_SUBAGENT_MODEL: claude-sonnet-4-6
           CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: '1'
           AUDIT_ROOT: ${{ steps.audit-context.outputs.root }}
         run: |

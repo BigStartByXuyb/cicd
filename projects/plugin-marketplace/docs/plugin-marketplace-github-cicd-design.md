@@ -114,7 +114,7 @@ job 名称：`deterministic-validation`。
 
 执行顺序：
 
-1. 使用固定 Node.js 和 Claude Code CLI 版本，通过 Claude Code 的 Anthropic 兼容配置直接调用 DeepSeek `deepseek-flash` 模型。
+1. 使用固定 Node.js 和 Claude Code CLI 版本，通过 DeepSeek Anthropic 兼容接口调用 `deepseek-flash`。Claude Code 使用 `claude-sonnet-4-6` Anthropic 模型别名；DeepSeek 将 Sonnet 别名映射到 Flash。
 2. 根据 base SHA 和 head SHA 找出 marketplace 及变更插件。
 3. 对根 marketplace 和受影响插件运行：
 
@@ -185,10 +185,10 @@ cd <audit root> && claude -p <fixed prompt> < <audit context> \
 ```text
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 ANTHROPIC_AUTH_TOKEN=${{ secrets.ANTHROPIC_API_KEY }}
-ANTHROPIC_MODEL=deepseek-flash
+ANTHROPIC_MODEL=claude-sonnet-4-6
 ```
 
-这里仍然调用 Claude Code CLI，模型服务由 DeepSeek 的 Anthropic 兼容接口提供，使用当前 API 模型 ID `deepseek-flash`。仓库不保存 API key；GitHub Actions 只从
+这里仍然调用 Claude Code CLI，模型服务由 DeepSeek 的 Anthropic 兼容接口提供。接口要求 Anthropic 模型名使用 `claude-*` 别名；DeepSeek 将 `claude-sonnet-*` 映射到 API 模型 ID `deepseek-flash`。仓库不保存 API key；GitHub Actions 只从
 `workflow_call` 显式传入的 Organization Secret 注入。
 
 Claude 不得修改文件、执行插件代码、读取工作区外文件、访问网络或调用 MCP。
