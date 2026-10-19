@@ -29,8 +29,6 @@ plugin:deterministic:
 plugin:runtime-js:
   extends: .ci-plugin
   stage: test
-  variables:
-    CI_INSTALL_PWSH: "true"
   script:
     - |
       cd "$CI_CALLER_DIR"

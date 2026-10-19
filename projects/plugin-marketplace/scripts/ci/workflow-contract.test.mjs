@@ -6,6 +6,7 @@ import path from 'node:path';
 const central = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/plugin-marketplace.yml'), 'utf8');
 const desktop = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/desktop-app.yml'), 'utf8');
 const gitlabCommon = fs.readFileSync(path.resolve(process.cwd(), 'templates/common.yml'), 'utf8');
+const gitlabPluginTemplate = fs.readFileSync(path.resolve(process.cwd(), 'templates/plugin-marketplace.yml'), 'utf8');
 // 调用方仓库的 workflow：本地并排放着同级的 plugin-marketplace-worktree 时直接读；
 // 没有那份检出（例如只 clone 了 cicd 本身）就跳过调用方那几条断言 —— 缺检出不是契约失败。
 const callerPath = process.env.CALLER_WORKFLOW ?? path.resolve(process.cwd(), '..', 'plugin-marketplace-worktree/.github/workflows/plugin-cicd.yml');
@@ -31,8 +32,16 @@ test('semantic audit uses the DeepSeek Flash Anthropic alias through Claude Code
       assert.match(config, new RegExp(`${name}:\\s*['"]?claude-sonnet-4-6`));
     }
     assert.doesNotMatch(config, /ANTHROPIC_(?:DEFAULT_\w+_)?MODEL:\s*['"]?deepseek-flash/);
+    assert.match(config, /CLAUDE_CODE_MAX_OUTPUT_TOKENS:\s*['"]?64000/);
   }
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
+});
+
+test('GitLab JavaScript runtime tests do not install the PowerShell runtime', () => {
+  const jsJob = gitlabPluginTemplate.match(/plugin:runtime-js:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
+  const pwshJob = gitlabPluginTemplate.match(/plugin:runtime-pwsh:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
+  assert.doesNotMatch(jsJob, /CI_INSTALL_PWSH/);
+  assert.match(pwshJob, /CI_INSTALL_PWSH:\s*["']true/);
 });
 
 test('semantic audit reads the workspace on demand instead of inlining plugin sources', () => {
