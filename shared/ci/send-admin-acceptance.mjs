@@ -11,6 +11,9 @@ const auditLines = audit
       ...(audit.reportJob ? [`审计报告：${audit.reportJob.web_url ?? ''}`] : []),
     ]
   : ['语义审计：请在中央流水线中查看审计 job。'];
+const mergeRequestUrl = process.env.CALLER_MR_IID && process.env.CALLER_PROJECT_PATH
+  ? `${process.env.CI_SERVER_URL}/${process.env.CALLER_PROJECT_PATH}/-/merge_requests/${process.env.CALLER_MR_IID}`
+  : null;
 
 const markdown = [
   `【MW CI/CD｜待管理员验收】${process.env.CALLER_PROJECT_PATH ?? ''}`,
@@ -18,6 +21,7 @@ const markdown = [
   `提交：${String(process.env.CALLER_COMMIT_SHA ?? '').slice(0, 12) || '未知'}`,
   `分支：${process.env.CALLER_REF_NAME ?? '未知'}`,
   ...(process.env.CALLER_MR_IID ? [`MR：!${process.env.CALLER_MR_IID} ${process.env.CALLER_MR_TITLE ?? ''}`] : []),
+  ...(mergeRequestUrl ? [`MR 审计评论：${mergeRequestUrl}`] : []),
   '',
   '所有 CI job 已通过，请管理员完成验收。',
   ...auditLines,

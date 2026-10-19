@@ -39,7 +39,7 @@ export function buildFeishuNotification(input) {
     ...(input.unresolvedReviewerLogins?.length
       ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；这些审阅者未收到私信。`]
       : []),
-    `查看 CI 审计报告：${input.reportUrl}`,
+    `查看 CI 审计详情：${input.reportUrl}`,
   ].join('\n');
 
   return {

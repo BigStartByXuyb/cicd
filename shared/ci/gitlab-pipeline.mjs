@@ -21,14 +21,14 @@ export async function readPipelineJobs() {
   return response.json();
 }
 
-export async function readReportArtifactUrl() {
-  if (!process.env.CI_PROJECT_URL || !process.env.CI_API_V4_URL || !process.env.CI_PROJECT_ID || !process.env.CI_PIPELINE_ID || !process.env.GITLAB_API_TOKEN) {
+export async function readReportJobUrl() {
+  if (!process.env.CI_API_V4_URL || !process.env.CI_PROJECT_ID || !process.env.CI_PIPELINE_ID || !process.env.GITLAB_API_TOKEN) {
     return null;
   }
   const jobs = await readPipelineJobs();
   const reportJob = jobs.find((job) => job.stage === 'report' && job.status === 'success');
   if (!reportJob) return process.env.CI_PIPELINE_URL ?? null;
-  return `${process.env.CI_PROJECT_URL}/-/jobs/${reportJob.id}/artifacts/file/.ci-tmp/final-report.md`;
+  return reportJob.web_url ?? process.env.CI_PIPELINE_URL ?? null;
 }
 
 function redact(text) {

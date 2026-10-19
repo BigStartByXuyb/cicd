@@ -32,7 +32,7 @@ const markdown = [
   ...formatReviewFindings(input.findings),
   `运行时测试：${input.runtimeResult === 'success' ? 'PASS' : input.runtimeResult ?? '未运行'}`,
   '',
-  `CI 审计报告：${input.reportUrl ?? ''}`
+  `CI 审计详情：${input.reportUrl ?? ''}`
 ].join('\n');
 
 if (process.argv.includes('--dry-run')) {

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readReportArtifactUrl } from '../../../../shared/ci/gitlab-pipeline.mjs';
+import { readReportJobUrl } from '../../../../shared/ci/gitlab-pipeline.mjs';
 
 // 从流水线环境与报告产物拼出飞书通知的输入。
 // GitHub 侧由 workflow 用事件 JSON 拼同一形状；两处字段口径必须一致（消费方见 notify-feishu.mjs）。
@@ -66,7 +66,7 @@ const input = {
   blockingFindings: Number(final?.checks?.semantic?.blockingFindings ?? 0),
   reviewFindings: Number(final?.checks?.semantic?.reviewFindings ?? 0),
   findings: semantic?.findings ?? [],
-  reportUrl: await readReportArtifactUrl() ?? process.env.CALLER_PIPELINE_URL ?? '',
+  reportUrl: mergeRequest?.web_url ?? await readReportJobUrl() ?? process.env.CALLER_PIPELINE_URL ?? '',
 };
 
 fs.writeFileSync(outputPath, `${JSON.stringify(input)}\n`);
