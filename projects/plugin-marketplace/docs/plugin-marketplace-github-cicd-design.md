@@ -186,6 +186,7 @@ cd <audit root> && claude -p <fixed prompt> < <audit context> \
 ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 ANTHROPIC_AUTH_TOKEN=${{ secrets.ANTHROPIC_API_KEY }}
 ANTHROPIC_MODEL=claude-sonnet-4-6
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 ```
 
 这里仍然调用 Claude Code CLI，模型服务由 DeepSeek 的 Anthropic 兼容接口提供。接口要求 Anthropic 模型名使用 `claude-*` 别名；DeepSeek 将 `claude-sonnet-*` 映射到 API 模型 ID `deepseek-flash`。仓库不保存 API key；GitHub Actions 只从
