@@ -1,4 +1,4 @@
-import { sendFeishuText } from './feishu-send.mjs';
+import { readRecipientMap, sendFeishuText } from './feishu-send.mjs';
 import { readFinalReport, readPipelineJobs } from './gitlab-pipeline.mjs';
 
 const jobs = await readPipelineJobs();
@@ -29,11 +29,24 @@ const markdown = [
   `中央流水线：${process.env.CI_PIPELINE_URL ?? ''}`,
 ].join('\n');
 
+const recipientMap = readRecipientMap(process.env.FEISHU_RECIPIENT_MAP_JSON);
+const adminLogins = [...new Set((process.env.FEISHU_ADMIN_GITLAB_LOGINS ?? '')
+  .split(',')
+  .map((login) => login.trim())
+  .filter(Boolean))];
+const mappedAdminLogins = adminLogins.filter((login) => recipientMap[login]);
+const unmappedAdminLogins = adminLogins.filter((login) => !recipientMap[login]);
 const delivery = await sendFeishuText({
   appId: process.env.FEISHU_APP_ID,
   appSecret: process.env.FEISHU_APP_SECRET,
-  chatId: process.env.FEISHU_DEFAULT_CHAT_ID,
+  recipientMap,
+  reviewerLogins: mappedAdminLogins,
   markdown,
 });
 
-process.stdout.write(`${JSON.stringify({ acceptance: 'requested', delivery: delivery.skipped ? 'skipped' : 'sent' })}\n`);
+process.stdout.write(`${JSON.stringify({
+  acceptance: 'requested',
+  delivery: delivery.skipped ? 'skipped' : 'sent',
+  delivered: delivery.delivered ?? 0,
+  unmappedAdminLogins,
+})}\n`);
