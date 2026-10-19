@@ -37,7 +37,17 @@ plugin:runtime-js:
       files=$(find plugins -path '*/scripts/tests/*.test.js' | sort)
       if [ -z "$files" ]; then echo "plugins/**/scripts/tests/*.test.js 未匹配到任何用例"; exit 1; fi
       echo "$files"
+      set +e
       node --test $files
+      status=$?
+      set -e
+      runtime_status=failed
+      if [ "$status" -eq 0 ]; then runtime_status=success; fi
+      printf '{"status":"%s"}\n' "$runtime_status" > "$CI_TMP/runtime-js.json"
+      exit "$status"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/runtime-js.json"]
 
 # 插件自带的 PowerShell 用例：在 Node 镜像里安装 PowerShell 7，测试入口同时依赖 Node 与 pwsh。
 plugin:runtime-pwsh:
@@ -55,7 +65,15 @@ plugin:runtime-pwsh:
       for file in $files; do
         pwsh -NoProfile -File "$file" || failed="$failed $file"
       done
-      if [ -n "$failed" ]; then echo "PowerShell 用例失败:$failed"; exit 1; fi
+      if [ -n "$failed" ]; then
+        echo "PowerShell 用例失败:$failed"
+        printf '{"status":"failed"}\n' > "$CI_TMP/runtime-pwsh.json"
+        exit 1
+      fi
+      printf '{"status":"success"}\n' > "$CI_TMP/runtime-pwsh.json"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/runtime-pwsh.json"]
 
 # 语义审计：读上下文、调 DeepSeek 的 Anthropic 兼容端点，只读不执行仓库代码。
 # 确定性校验没过时这一关不跑（needs 决定），与调用方的门禁口径一致。
@@ -120,6 +138,7 @@ plugin:final-report:
     - |
       plugins_json="$(cat "$CI_TMP/changed-plugins.json" 2>/dev/null || echo '[]')"
       args=(--plugins-json "$plugins_json" --output-json "$CI_TMP/final-report.json" --output-markdown "$CI_TMP/final-report.md")
+      args+=(--runtime-js "$CI_TMP/runtime-js.json" --runtime-pwsh "$CI_TMP/runtime-pwsh.json")
       if [ -f "$CI_TMP/deterministic-report.json" ]; then args+=(--deterministic "$CI_TMP/deterministic-report.json"); fi
       if [ -f "$CI_TMP/semantic-report.json" ]; then args+=(--semantic "$CI_TMP/semantic-report.json"); fi
       if [ -f "$CI_TMP/semantic-report.md" ]; then args+=(--semantic-markdown "$CI_TMP/semantic-report.md"); fi

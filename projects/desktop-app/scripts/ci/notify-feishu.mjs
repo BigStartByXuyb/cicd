@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 import { readRecipientMap, sendFeishuText } from '../../../../shared/ci/feishu-send.mjs';
-import { formatReviewFindings } from '../../../../shared/ci/audit-summary.mjs';
+import { formatFailedJobs, formatReviewFindings } from '../../../../shared/ci/audit-summary.mjs';
 
 /*
  * 应用 CI 的飞书通知。输入 JSON 里是本次运行的结论与仓库信息（由 workflow 拼好）。
@@ -31,6 +31,7 @@ const markdown = [
   `语义审计：${input.auditResult ?? '未完成'}（阻断 ${input.blockingFindings ?? 0} / 复核 ${input.reviewFindings ?? 0}）`,
   ...formatReviewFindings(input.findings),
   `运行时测试：${input.runtimeResult === 'success' ? 'PASS' : input.runtimeResult ?? '未运行'}`,
+  ...formatFailedJobs(input.failedJobs),
   '',
   `CI 审计详情：${input.reportUrl ?? ''}`
 ].join('\n');

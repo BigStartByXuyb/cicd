@@ -1,7 +1,7 @@
 # 两个套件共用的中央下游流水线骨架。调用方只传项目、提交和套件元数据。
 # 中央 source:checkout 使用 CI_JOB_TOKEN 拉取调用方源码；调用方项目必须允许 data_ai/cicd。
 
-stages: [dispatch, source, source-notify, validate, validate-notify, test, test-notify, audit, audit-notify, report, report-notify, notify, notify-status, acceptance, release]
+stages: [dispatch, source, validate, test, audit, report, notify, acceptance, release]
 
 workflow:
   auto_cancel:
@@ -61,75 +61,6 @@ variables:
   dependencies: []
   before_script:
     - unset CI_JOB_TOKEN
-
-pipeline:started:
-  extends: .ci-notify
-  stage: dispatch
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: started
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
-
-pipeline:source-status:
-  extends: .ci-notify
-  stage: source-notify
-  when: always
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: source
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
-
-pipeline:validate-status:
-  extends: .ci-notify
-  stage: validate-notify
-  when: always
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: validate
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
-
-pipeline:test-status:
-  extends: .ci-notify
-  stage: test-notify
-  when: always
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: test
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
-
-pipeline:audit-status:
-  extends: .ci-notify
-  stage: audit-notify
-  when: always
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: audit
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
-
-pipeline:report-status:
-  extends: .ci-notify
-  stage: report-notify
-  when: always
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: report
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
-
-pipeline:notify-status:
-  extends: .ci-notify
-  stage: notify-status
-  when: always
-  allow_failure: true
-  variables:
-    CI_STATUS_STAGE: notify
-  script:
-    - node "$CI_IMPL_DIR/shared/ci/report-pipeline-stage.mjs"
 
 pipeline:admin-acceptance:
   extends: .ci-notify

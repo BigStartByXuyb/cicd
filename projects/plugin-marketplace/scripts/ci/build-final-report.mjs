@@ -11,6 +11,9 @@ function readJson(path) {
 
 const deterministic = readJson(arg('--deterministic'));
 const semantic = readJson(arg('--semantic'));
+const runtimeJs = readJson(arg('--runtime-js'));
+const runtimePwsh = readJson(arg('--runtime-pwsh'));
+const runtimeChecksRequired = process.argv.includes('--runtime-js') || process.argv.includes('--runtime-pwsh');
 const semanticMarkdownPath = arg('--semantic-markdown');
 const outputJsonPath = arg('--output-json');
 const outputMarkdownPath = arg('--output-markdown');
@@ -19,18 +22,23 @@ if (!outputJsonPath || !outputMarkdownPath) throw new Error('--output-json and -
 
 const deterministicStatus = deterministic?.status ?? 'MISSING';
 const semanticResult = semantic?.result ?? 'SKIPPED';
+const runtimeJsStatus = runtimeJs?.status ?? (runtimeChecksRequired ? 'MISSING' : 'NOT_REPORTED');
+const runtimePwshStatus = runtimePwsh?.status ?? (runtimeChecksRequired ? 'MISSING' : 'NOT_REPORTED');
+const runtimeFailed = runtimeChecksRequired && [runtimeJsStatus, runtimePwshStatus].some((status) => status !== 'success');
 // INVALID（报告不合契约、不能采信）与 BLOCK（确实发现了阻断问题）是两回事：
 // 混成同一个结论会让人以为代码被阻断，而同一份报告里又写着「阻断问题：0」。
-// 检查仍然失败（由语义审计 job 的退出码决定），只是结论名如实反映原因。
+// 不可信审计报告与运行时失败分开命名，避免错误地显示为 PASS 或 BLOCK。
 const decision = deterministicStatus !== 'PASS'
   ? 'BLOCK'
   : semanticResult === 'BLOCK'
     ? 'BLOCK'
     : semanticResult === 'INVALID'
       ? 'INVALID'
-      : semanticResult === 'REVIEW' || semanticResult === 'SKIPPED'
-        ? 'REVIEW'
-        : 'PASS';
+      : runtimeFailed
+        ? 'FAILED'
+        : semanticResult === 'REVIEW' || semanticResult === 'SKIPPED'
+          ? 'REVIEW'
+          : 'PASS';
 const report = {
   schemaVersion: 1,
   kind: 'plugin-ci-final',
@@ -44,6 +52,7 @@ const report = {
       reviewFindings: semantic?.reviewFindings ?? 0,
       error: semantic?.error ?? null,
     },
+    runtime: { javascript: runtimeJsStatus, powershell: runtimePwshStatus },
   },
   findings: semantic?.findings ?? [],
 };
@@ -65,6 +74,8 @@ const markdown = [
   `- 语义审计：**${semanticResult}**`,
   `- 阻断问题：**${report.checks.semantic.blockingFindings}**`,
   `- 待确认问题：**${report.checks.semantic.reviewFindings}**`,
+  `- JavaScript 运行时测试：**${runtimeJsStatus}**`,
+  `- PowerShell 运行时测试：**${runtimePwshStatus}**`,
   ...(report.checks.semantic.error ? [`- 语义审计失败原因：**${report.checks.semantic.error}**`] : []),
   ...(semanticResult === 'INVALID'
     ? ['- 说明：`INVALID` 表示审计报告不合契约、无法采信，**不是发现了阻断问题**——检查因报告不可信而失败，请重跑语义审计或按上一条原因修报告格式。']
