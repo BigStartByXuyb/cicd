@@ -1,4 +1,11 @@
 import { sendFeishuText } from './feishu-send.mjs';
+import { readAuditDecision, readPipelineJobs } from './gitlab-pipeline.mjs';
+
+const jobs = await readPipelineJobs();
+const audit = await readAuditDecision(jobs);
+const auditLine = audit
+  ? `语义审计：${audit.decision}${audit.decision === 'REVIEW' ? '，需要管理员复核' : ''}\n${audit.job.web_url ?? ''}`
+  : '语义审计：请在中央流水线中查看审计 job。';
 
 const markdown = [
   `【MW CI/CD｜待管理员验收】${process.env.CALLER_PROJECT_PATH ?? ''}`,
@@ -8,6 +15,7 @@ const markdown = [
   ...(process.env.CALLER_MR_IID ? [`MR：!${process.env.CALLER_MR_IID} ${process.env.CALLER_MR_TITLE ?? ''}`] : []),
   '',
   '所有 CI job 已通过，请管理员完成验收。',
+  auditLine,
   `源流水线：${process.env.CALLER_PIPELINE_URL ?? ''}`,
   `中央流水线：${process.env.CI_PIPELINE_URL ?? ''}`,
 ].join('\n');
