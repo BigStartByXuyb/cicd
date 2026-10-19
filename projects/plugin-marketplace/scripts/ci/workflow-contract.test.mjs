@@ -17,10 +17,10 @@ test('central workflow declares every required workflow-call secret', () => {
   assert.doesNotMatch(central, /environment:\s*plugin-cicd-prod/);
 });
 
-test('semantic audit permits the configured DeepSeek model alias', () => {
+test('semantic audit uses the current DeepSeek model through Claude Code environment settings', () => {
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
-  assert.match(central, /--model\s+claude-sonnet-4-6/);
-  assert.doesNotMatch(central, /--model\s+deepseek-v4-flash/);
+  assert.match(central, /ANTHROPIC_MODEL:\s*deepseek-flash/);
+  assert.doesNotMatch(central, /--model\s+claude-sonnet-4-6/);
 });
 
 test('semantic audit reads the workspace on demand instead of inlining plugin sources', () => {

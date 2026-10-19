@@ -17,10 +17,10 @@ if (process.argv.includes('--dry-run')) {
 const delivered = await sendFeishuText({
   appId: process.env.FEISHU_APP_ID,
   appSecret: process.env.FEISHU_APP_SECRET,
-  chatId: process.env.FEISHU_DEFAULT_CHAT_ID,
+  chatId: recipientMap[input.authorLogin] && unresolvedReviewerLogins.length === 0 ? undefined : process.env.FEISHU_DEFAULT_CHAT_ID,
   recipientMap,
   authorLogin: input.authorLogin,
   reviewerLogins: input.reviewerLogins,
   markdown: notification.markdown
 });
-process.stdout.write(`${JSON.stringify({ status: notification.status, delivered: delivered.delivered })}\n`);
+process.stdout.write(`${JSON.stringify({ status: notification.status, ...delivered })}\n`);

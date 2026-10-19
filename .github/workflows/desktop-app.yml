@@ -291,12 +291,17 @@ jobs:
       - name: Run DeepSeek-backed Claude audit
         id: claude-audit
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_MODEL: deepseek-flash
+          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-flash
+          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-flash
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash
+          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-flash
           CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: '1'
           AUDIT_ROOT: ${{ steps.audit-context.outputs.root }}
         run: |
-          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+          if [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
             echo "::error title=缺少 ANTHROPIC_API_KEY::仓库还没有配置语义审计用的密钥（DeepSeek 的 Anthropic 兼容端点）。"
             exit 1
           fi
@@ -310,7 +315,6 @@ jobs:
             --tools "Read" \
             --add-dir "$RUNNER_TEMP" \
             --output-format text \
-            --model claude-sonnet-4-6 \
             -p "$(cat "$CI_PROJECT_DIR/docs/app-semantic-audit.md")" \
             < "$RUNNER_TEMP/audit-context.md" > "$RUNNER_TEMP/audit-report.md" 2> "$RUNNER_TEMP/audit-cli.log"
           status=$?

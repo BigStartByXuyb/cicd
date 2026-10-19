@@ -4,8 +4,8 @@
  *
  * 两个提供方共用同一份 upsert 契约，只有传输层不同：
  * - github：GitHub Issues 评论接口，令牌与仓库来自 GITHUB_TOKEN / GITHUB_REPOSITORY，编号来自 PR_NUMBER。
- * - gitlab：GitLab Merge Request Notes 接口，令牌与项目来自 GITLAB_API_TOKEN / CI_PROJECT_ID /
- *   CI_API_V4_URL，编号来自 CI_MERGE_REQUEST_IID。
+ * - gitlab：GitLab Merge Request Notes 接口，令牌来自 GITLAB_API_TOKEN，
+ *   CI_API_V4_URL，项目与 MR 编号来自 CALLER_PROJECT_ID / CALLER_MR_IID。
  */
 
 export const REVIEW_MARKERS = {
@@ -59,7 +59,7 @@ export async function upsertReviewNote({ provider, marker, markdown, token, repo
     return upsertGitHubNote({ token, repository, number, marker, markdown });
   }
   if (provider === 'gitlab') {
-    if (!apiBase || !projectId || !mergeRequestIid) throw new Error('CI_API_V4_URL, CI_PROJECT_ID and CI_MERGE_REQUEST_IID are required');
+    if (!apiBase || !projectId || !mergeRequestIid) throw new Error('CI_API_V4_URL, CALLER_PROJECT_ID and CALLER_MR_IID are required');
     return upsertGitLabNote({ token, apiBase, projectId, mergeRequestIid, marker, markdown });
   }
   throw new Error(`unsupported provider: ${provider}`);
@@ -70,8 +70,8 @@ export async function upsertReviewNote({ provider, marker, markdown, token, repo
  * 两个提供方各自的令牌与仓库标识不在这里回退——缺哪个由 upsertReviewNote 报出来。
  */
 export function resolveReviewTarget(env = process.env) {
-  if (env.CI_MERGE_REQUEST_IID) {
-    return { provider: 'gitlab', token: env.GITLAB_API_TOKEN, apiBase: env.CI_API_V4_URL, projectId: env.CI_PROJECT_ID, mergeRequestIid: env.CI_MERGE_REQUEST_IID };
+  if (env.CALLER_MR_IID) {
+    return { provider: 'gitlab', token: env.GITLAB_API_TOKEN, apiBase: env.CI_API_V4_URL, projectId: env.CALLER_PROJECT_ID, mergeRequestIid: env.CALLER_MR_IID };
   }
   return { provider: 'github', token: env.GITHUB_TOKEN, repository: env.GITHUB_REPOSITORY, number: env.PR_NUMBER };
 }

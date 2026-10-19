@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readReportJobUrl } from '../../../../shared/ci/gitlab-pipeline.mjs';
 
 // 从流水线环境与报告产物拼出飞书通知的输入。
 // GitHub 侧由 workflow 用事件 JSON 拼同一形状；两处字段口径必须一致（消费方见 notify-feishu.mjs）。
@@ -42,20 +43,20 @@ const semantic = readJson('semantic-report.json');
 const final = readJson('final-report.json');
 const mergeRequest = await readMergeRequest({
   apiBase: process.env.CI_API_V4_URL,
-  projectId: process.env.CI_PROJECT_ID,
-  iid: process.env.CI_MERGE_REQUEST_IID,
+  projectId: process.env.CALLER_PROJECT_ID,
+  iid: process.env.CALLER_MR_IID,
   token: process.env.GITLAB_API_TOKEN,
 });
 
 const auditResult = semantic?.result ?? null;
 const ranRuntimeTests = fs.existsSync(path.join(findingsDir, 'coverage.txt')) || fs.existsSync(path.join(findingsDir, 'ui-coverage.txt'));
 const input = {
-  repository: process.env.CI_PROJECT_PATH ?? '',
-  trigger: `${process.env.CI_PIPELINE_SOURCE ?? 'unknown'} ${process.env.CI_COMMIT_REF_NAME ?? ''}`.trim(),
-  pullRequestNumber: Number(process.env.CI_MERGE_REQUEST_IID ?? 0),
-  pullRequestTitle: mergeRequest?.title ?? process.env.CI_MERGE_REQUEST_TITLE ?? '',
-  commitSha: process.env.CI_COMMIT_SHA ?? '',
-  authorLogin: mergeRequest?.author?.username ?? process.env.GITLAB_USER_LOGIN ?? 'unknown',
+  repository: process.env.CALLER_PROJECT_PATH ?? '',
+  trigger: `${process.env.CALLER_PIPELINE_SOURCE ?? 'unknown'} ${process.env.CALLER_REF_NAME ?? ''}`.trim(),
+  pullRequestNumber: Number(process.env.CALLER_MR_IID ?? 0),
+  pullRequestTitle: mergeRequest?.title ?? process.env.CALLER_MR_TITLE ?? '',
+  commitSha: process.env.CALLER_COMMIT_SHA ?? '',
+  authorLogin: mergeRequest?.author?.username ?? process.env.CALLER_USER_LOGIN ?? 'unknown',
   reviewerLogins: (mergeRequest?.reviewers ?? []).map((user) => user.username).filter(Boolean),
   runtimeResult: ranRuntimeTests ? 'success' : 'failure',
   deterministicResult: deterministic?.status === 'PASS' ? 'success' : 'failure',
@@ -64,7 +65,8 @@ const input = {
   finalDecision: final?.decision ?? 'UNKNOWN',
   blockingFindings: Number(final?.checks?.semantic?.blockingFindings ?? 0),
   reviewFindings: Number(final?.checks?.semantic?.reviewFindings ?? 0),
-  reportUrl: process.env.CI_PIPELINE_URL ?? '',
+  findings: semantic?.findings ?? [],
+  reportUrl: mergeRequest?.web_url ?? await readReportJobUrl() ?? process.env.CALLER_PIPELINE_URL ?? '',
 };
 
 fs.writeFileSync(outputPath, `${JSON.stringify(input)}\n`);

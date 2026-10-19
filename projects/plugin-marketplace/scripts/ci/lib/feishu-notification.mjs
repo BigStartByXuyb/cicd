@@ -1,3 +1,5 @@
+import { formatReviewFindings } from '../../../../../shared/ci/audit-summary.mjs';
+
 function shortSha(value) {
   return String(value).slice(0, 12);
 }
@@ -31,12 +33,13 @@ export function buildFeishuNotification(input) {
     semanticLine,
     `阻断问题：${input.blockingFindings}`,
     `普通建议：${input.reviewFindings}`,
+    ...formatReviewFindings(input.findings),
     '',
     `请审阅当前分析结果并在 PR 中反馈。审阅者：${input.reviewerLogins?.join(', ') || '未指定'}`,
     ...(input.unresolvedReviewerLogins?.length
-      ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；已通知默认维护群聊。`]
+      ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；这些审阅者未收到私信。`]
       : []),
-    `查看 PR：${input.reportUrl}`,
+    `查看 CI 审计详情：${input.reportUrl}`,
   ].join('\n');
 
   return {

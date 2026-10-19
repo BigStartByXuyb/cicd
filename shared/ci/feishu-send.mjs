@@ -5,8 +5,13 @@ import { resolveFeishuRecipients } from '../../projects/plugin-marketplace/scrip
  * 只负责「拿 token → 解析收件人 → 逐条发送」，消息文案由调用方按自己的口径拼好传进来。
  */
 export async function sendFeishuText({ appId, appSecret, chatId, recipientMap = {}, authorLogin, reviewerLogins = [], markdown }) {
-  if (!appId || !appSecret || !chatId) throw new Error('FEISHU_APP_ID, FEISHU_APP_SECRET, and FEISHU_DEFAULT_CHAT_ID are required');
+  if (!appId || !appSecret) {
+    return { skipped: true, reason: '未配置飞书应用凭据（FEISHU_APP_ID / FEISHU_APP_SECRET）' };
+  }
   if (!markdown) throw new Error('markdown is required');
+
+  const recipients = resolveFeishuRecipients({ authorLogin, reviewerLogins, recipientMap, defaultChatId: chatId });
+  if (recipients.length === 0) return { skipped: true, reason: '没有已映射收件人或默认群聊' };
 
   const tokenResponse = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     method: 'POST',
@@ -16,8 +21,6 @@ export async function sendFeishuText({ appId, appSecret, chatId, recipientMap = 
   if (!tokenResponse.ok) throw new Error(`Feishu token request failed: ${tokenResponse.status}`);
   const { tenant_access_token: token } = await tokenResponse.json();
 
-  const recipients = resolveFeishuRecipients({ authorLogin, reviewerLogins, recipientMap, defaultChatId: chatId });
-  if (recipients.length === 0) throw new Error('no Feishu recipients resolved');
   for (const recipient of recipients) {
     const messageResponse = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${recipient.receiveIdType}`, {
       method: 'POST',
