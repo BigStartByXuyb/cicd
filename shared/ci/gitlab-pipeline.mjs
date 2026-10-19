@@ -1,4 +1,5 @@
-const TRACE_MATCH = /(?:\berror\b|\bfatal\b|\bfailed\b|\bnot ok\b|\bnot found\b|\bdenied\b|\btimed out\b|\bexit code\b|\bERR_[A-Z0-9_]+\b|\bAssertionError\b|未通过|缺少|失败|退出码|找不到|无法|✖)/i;
+const TRACE_MATCH = /(?:\berror\b|\bfatal\b|\bfailed\b|\bnot ok\b|\bnot found\b|\bcommand not found\b|\bdenied\b|\btimed out\b|\bexit code\b|\bERR_[A-Z0-9_]+\b|\bENOENT\b|\bspawn(?:Sync|Async)\b|\bAssertionError\b|未通过|缺少|失败|退出码|找不到|无法|✖)/i;
+const TRACE_NOISE = /(?:upload(?:ing)? artifacts|artifacts-uploader|section_(?:start|end)|cleaning up project directory|ERROR: Job failed: exit code)/i;
 
 function gitlabRequestUrl(path) {
   const { CI_API_V4_URL, CI_PROJECT_ID, GITLAB_API_TOKEN } = process.env;
@@ -20,6 +21,16 @@ export async function readPipelineJobs() {
   return response.json();
 }
 
+export async function readReportArtifactUrl() {
+  if (!process.env.CI_PROJECT_URL || !process.env.CI_API_V4_URL || !process.env.CI_PROJECT_ID || !process.env.CI_PIPELINE_ID || !process.env.GITLAB_API_TOKEN) {
+    return null;
+  }
+  const jobs = await readPipelineJobs();
+  const reportJob = jobs.find((job) => job.stage === 'report' && job.status === 'success');
+  if (!reportJob) return process.env.CI_PIPELINE_URL ?? null;
+  return `${process.env.CI_PROJECT_URL}/-/jobs/${reportJob.id}/artifacts/file/.ci-tmp/final-report.md`;
+}
+
 function redact(text) {
   return text
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
@@ -39,8 +50,8 @@ export async function readJobFailureSummary(job) {
   const lines = redact(await response.text())
     .split(/\r?\n/)
     .map((line) => line.replace(/^\S+\s+\d{2}[OE]\s+/, '').trim())
-    .filter((line) => line && TRACE_MATCH.test(line) && !/^ERROR: Job failed: exit code/i.test(line));
-  const uniqueLines = [...new Set(lines)].slice(-3);
+    .filter((line) => line && TRACE_MATCH.test(line) && !TRACE_NOISE.test(line));
+  const uniqueLines = [...new Set(lines)].slice(0, 3);
   const summary = uniqueLines.join('\n').slice(-420);
   return summary || '日志未提供可提取的错误摘要，请打开 job 查看完整日志。';
 }
@@ -53,7 +64,26 @@ export async function readAuditDecision(jobs) {
     if (!response.ok) continue;
     const trace = await response.text();
     const match = trace.match(/语义审计结论\s*[:：]\s*(PASS|REVIEW|BLOCK|INVALID)/i);
-    if (match) return { decision: match[1].toUpperCase(), job };
+    if (!match) continue;
+
+    const reportJob = jobs.find((candidate) => candidate.stage === 'report' && candidate.status === 'success');
+    let reportTrace = '';
+    if (reportJob) {
+      const reportRequest = gitlabRequestUrl(`/jobs/${reportJob.id}/trace`);
+      const reportResponse = await fetch(reportRequest.url, { headers: reportRequest.headers });
+      if (reportResponse.ok) reportTrace = await reportResponse.text();
+    }
+    const findingTitles = [...reportTrace.matchAll(/(?:\*\*REVIEW-\d+\*\*|### \[REVIEW-\d+\])\s*([^\r\n]+)/g)]
+      .map((finding) => finding[1].replace(/\*+$/g, '').replace(/\s*（范围：.*$/u, '').trim())
+      .filter(Boolean);
+    const count = reportTrace.match(/待确认问题：\*\*(\d+)\*\*/);
+    return {
+      decision: match[1].toUpperCase(),
+      job,
+      reportJob,
+      reviewFindings: count ? Number(count[1]) : findingTitles.length,
+      findingTitles: [...new Set(findingTitles)],
+    };
   }
   return null;
 }
