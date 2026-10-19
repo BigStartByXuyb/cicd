@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readReportJobUrl } from '../../../../shared/ci/gitlab-pipeline.mjs';
+import { readJobFailureSummary, readPipelineJobs, readReportJobUrl } from '../../../../shared/ci/gitlab-pipeline.mjs';
 
 // 从流水线环境与报告产物拼出飞书通知的输入。
 // GitHub 侧由 workflow 用事件 JSON 拼同一形状；两处字段口径必须一致（消费方见 lib/feishu-notification.mjs）。
@@ -49,6 +49,26 @@ const mergeRequest = await readMergeRequest({
 });
 
 const auditResult = semantic?.result ?? null;
+let pipelineJobs = [];
+try {
+  pipelineJobs = await readPipelineJobs();
+} catch (error) {
+  console.warn(`无法读取中央流水线 job 状态：${error.message}`);
+}
+const failedJobs = await Promise.all(pipelineJobs
+  .filter((job) => ['source', 'validate', 'test', 'audit', 'report'].includes(job.stage) && job.status === 'failed')
+  .map(async (job) => ({
+    name: job.name,
+    webUrl: job.web_url,
+    summary: await readJobFailureSummary(job).catch((error) => `无法读取 job 日志：${error.message}`),
+  })));
+const reportedDecision = final?.decision ?? 'UNKNOWN';
+const finalDecision = failedJobs.length && ['PASS', 'REVIEW'].includes(reportedDecision)
+  ? 'FAILED'
+  : reportedDecision;
+const runtimeResult = ['javascript', 'powershell'].every((name) => final?.checks?.runtime?.[name] === 'success')
+  ? 'success'
+  : 'failure';
 const input = {
   repository: process.env.CALLER_PROJECT_PATH ?? '',
   pullRequestNumber: Number(process.env.CALLER_MR_IID ?? 0),
@@ -60,7 +80,9 @@ const input = {
   deterministicResult: deterministic?.status === 'PASS' ? 'success' : 'failure',
   semanticResult: auditResult ? 'success' : 'failure',
   auditResult,
-  finalDecision: final?.decision ?? 'UNKNOWN',
+  finalDecision,
+  runtimeResult,
+  failedJobs,
   blockingFindings: Number(final?.checks?.semantic?.blockingFindings ?? 0),
   reviewFindings: Number(final?.checks?.semantic?.reviewFindings ?? 0),
   findings: final?.findings ?? semantic?.findings ?? [],

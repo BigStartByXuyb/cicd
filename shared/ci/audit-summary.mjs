@@ -13,3 +13,10 @@ export function formatReviewFindings(findings = [], limit = 5) {
   if (reviews.length > limit) lines.push(`- 另有 ${reviews.length - limit} 条建议，见完整报告`);
   return lines;
 }
+
+export function formatFailedJobs(failedJobs = [], limit = 5) {
+  return failedJobs.slice(0, limit).flatMap((job) => [
+    `- ${job.name}: ${job.summary ?? '失败，打开 job 查看日志'}`,
+    ...(job.webUrl ? [job.webUrl] : []),
+  ]);
+}

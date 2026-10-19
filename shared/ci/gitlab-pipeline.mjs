@@ -31,6 +31,16 @@ export async function readReportJobUrl() {
   return reportJob.web_url ?? process.env.CI_PIPELINE_URL ?? null;
 }
 
+export async function readFinalReport(jobs) {
+  const pipelineJobs = jobs ?? await readPipelineJobs();
+  const reportJob = pipelineJobs.find((job) => job.stage === 'report' && job.status === 'success');
+  if (!reportJob) return null;
+  const request = gitlabRequestUrl(`/jobs/${reportJob.id}/artifacts/.ci-tmp/final-report.json`);
+  const response = await fetch(request.url, { headers: request.headers });
+  if (!response.ok) return null;
+  return { report: await response.json(), job: reportJob };
+}
+
 function redact(text) {
   return text
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
@@ -54,36 +64,4 @@ export async function readJobFailureSummary(job) {
   const uniqueLines = [...new Set(lines)].slice(0, 3);
   const summary = uniqueLines.join('\n').slice(-420);
   return summary || '日志未提供可提取的错误摘要，请打开 job 查看完整日志。';
-}
-
-export async function readAuditDecision(jobs) {
-  const auditJobs = jobs.filter((job) => job.stage === 'audit' && job.status === 'success');
-  for (const job of auditJobs) {
-    const request = gitlabRequestUrl(`/jobs/${job.id}/trace`);
-    const response = await fetch(request.url, { headers: request.headers });
-    if (!response.ok) continue;
-    const trace = await response.text();
-    const match = trace.match(/语义审计结论\s*[:：]\s*(PASS|REVIEW|BLOCK|INVALID)/i);
-    if (!match) continue;
-
-    const reportJob = jobs.find((candidate) => candidate.stage === 'report' && candidate.status === 'success');
-    let reportTrace = '';
-    if (reportJob) {
-      const reportRequest = gitlabRequestUrl(`/jobs/${reportJob.id}/trace`);
-      const reportResponse = await fetch(reportRequest.url, { headers: reportRequest.headers });
-      if (reportResponse.ok) reportTrace = await reportResponse.text();
-    }
-    const findingTitles = [...reportTrace.matchAll(/(?:\*\*REVIEW-\d+\*\*|### \[REVIEW-\d+\])\s*([^\r\n]+)/g)]
-      .map((finding) => finding[1].replace(/\*+$/g, '').replace(/\s*（范围：.*$/u, '').trim())
-      .filter(Boolean);
-    const count = reportTrace.match(/待确认问题：\*\*(\d+)\*\*/);
-    return {
-      decision: match[1].toUpperCase(),
-      job,
-      reportJob,
-      reviewFindings: count ? Number(count[1]) : findingTitles.length,
-      findingTitles: [...new Set(findingTitles)],
-    };
-  }
-  return null;
 }
