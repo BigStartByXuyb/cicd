@@ -37,10 +37,10 @@ test('semantic audit uses the DeepSeek Flash Anthropic alias through Claude Code
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
 });
 
-test('GitLab JavaScript runtime tests do not install the PowerShell runtime', () => {
+test('GitLab plugin runtime jobs install PowerShell for suites that invoke pwsh', () => {
   const jsJob = gitlabPluginTemplate.match(/plugin:runtime-js:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
   const pwshJob = gitlabPluginTemplate.match(/plugin:runtime-pwsh:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
-  assert.doesNotMatch(jsJob, /CI_INSTALL_PWSH/);
+  assert.match(jsJob, /CI_INSTALL_PWSH:\s*["']true/);
   assert.match(pwshJob, /CI_INSTALL_PWSH:\s*["']true/);
 });
 

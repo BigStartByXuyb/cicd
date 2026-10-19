@@ -29,6 +29,8 @@ plugin:deterministic:
 plugin:runtime-js:
   extends: .ci-plugin
   stage: test
+  variables:
+    CI_INSTALL_PWSH: "true"
   script:
     - |
       cd "$CI_CALLER_DIR"
@@ -47,7 +49,7 @@ plugin:runtime-js:
     when: always
     paths: [".ci-tmp/runtime-js.json"]
 
-# 插件自带的 PowerShell 用例：在 Node 镜像里安装 PowerShell 7，测试入口同时依赖 Node 与 pwsh。
+# 插件自带的 PowerShell 用例：在 Node 镜像里安装 PowerShell 7。
 plugin:runtime-pwsh:
   extends: .ci-plugin
   stage: test
