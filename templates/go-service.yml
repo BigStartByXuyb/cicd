@@ -9,7 +9,9 @@ go:structure:
   script:
     - node "$CI_SUITE/scripts/ci/check-go-structure.mjs" --root "$CI_CALLER_DIR" --output "$CI_TMP/deterministic-structure.json" --markdown "$CI_TMP/deterministic-structure.md"
     - |
-      if [ -d "$CI_CALLER_DIR/web" ]; then
+      if [ -d "$CI_CALLER_DIR/internal/webui/assets" ]; then
+        npx --yes prettier@3.3.3 --check "$CI_CALLER_DIR/internal/webui/assets"
+      elif [ -d "$CI_CALLER_DIR/web" ]; then
         npx --yes prettier@3.3.3 --check "$CI_CALLER_DIR/web"
       fi
   artifacts:

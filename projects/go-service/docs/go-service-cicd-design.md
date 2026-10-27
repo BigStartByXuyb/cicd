@@ -6,7 +6,7 @@
 
 | Job | 跑什么 | 为什么单独一个 job |
 | --- | --- | --- |
-| `go:structure` | `check-go-structure.mjs`：仓库契约与分发配置、Go 文件位置、分层依赖方向、写死的机器路径；`web/` 存在时跑 prettier 检查 | 机械判定，不执行仓库里的任意代码；node 镜像即可 |
+| `go:structure` | `check-go-structure.mjs`：仓库契约与分发配置、Go 文件位置、分层依赖方向、写死的机器路径；`internal/webui/assets/` 存在时跑 prettier 检查 | 机械判定，不执行仓库里的任意代码；node 镜像即可 |
 | `go:toolchain` | `gofmt -l`、`go vet`、`go mod tidy` 后工作区无 diff、linux/windows 交叉编译 | 需要 Go 工具链，golang 镜像里跑；只编译不测试 |
 | `go:runtime-tests` | `go test -race -coverprofile` | 会执行未受信任的 MR 代码：不注入任何 secret |
 | `go:coverage-gate` | 解析 coverage profile，卡总覆盖率与单包覆盖率 | 与运行时测试分开：测试失败时门禁仍能给出明确结论 |
@@ -22,8 +22,8 @@
 | 仓库契约 | 缺 `go.mod` / `AGENTS.md`，或 `.gitlab-ci.yml` 没有分发到 `data_ai/cicd` 的 `go-service` | 仓库接错套件，或规范文件缺失后无人维护 |
 | 代码位置 | Go 文件不在 `cmd/`、`internal/`、`tools/` 下；`package main` 出现在 `cmd/` 之外 | 入口散落、包边界被破坏 |
 | 分层 | `internal/protocol` 依赖 center/node/drivers/store；`internal/drivers` 依赖 center/node；`internal/store` 依赖上层；`internal/` 引用 `cmd/` | 协议层被业务实现污染，改一处崩两处 |
-| 硬编码机器路径 | `cmd/`、`internal/`、`tools/`、`web/` 的源码出现盘符路径、`/home/`、`/Users/`、`file://`（注释除外） | 换机器跑不了，或悄悄写到别人机器上 |
-| 格式 | `gofmt -l` 输出非空；`web/` 存在时 prettier 检查失败 | 工程格式漂移 |
+| 硬编码机器路径 | `cmd/`、`internal/`、`tools/` 的源码出现盘符路径、`/home/`、`/Users/`、`file://`（注释除外） | 换机器跑不了，或悄悄写到别人机器上 |
+| 格式 | `gofmt -l` 输出非空；`internal/webui/assets/` 存在时 prettier 检查失败 | 工程格式漂移 |
 | 依赖整洁 | `go mod tidy` 后 `go.mod` / `go.sum` 有改动 | 依赖清单与代码不一致 |
 | 交叉编译 | linux/windows amd64 任一编译失败 | 只在本机平台能跑 |
 | 单元测试 | `go test -race ./...` 任一用例失败 | 行为回归与数据竞争 |
