@@ -9,6 +9,7 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "plugin-marketplace"'
     - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "desktop-app"'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "go-service"'
 
 variables:
   GIT_DEPTH: "0"
@@ -67,7 +68,7 @@ pipeline:admin-acceptance:
   extends: .ci-notify
   stage: acceptance
   rules:
-    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app"'
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app" || $CALLER_CI_SUITE == "go-service"'
   script:
     - node "$CI_IMPL_DIR/shared/ci/send-admin-acceptance.mjs"
 
@@ -76,12 +77,13 @@ source:checkout:
   image: $NODE_IMAGE
   stage: source
   rules:
-    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app"'
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app" || $CALLER_CI_SUITE == "go-service"'
   script:
     - |
       case "$CALLER_CI_SUITE:$CALLER_PROJECT_PATH" in
         plugin-marketplace:data_ai/plugins) ;;
         desktop-app:data_ai/mastergo-transcoder-gui) ;;
+        go-service:data_ai/svc_monitor) ;;
         *) echo "不支持的套件/源码仓库组合" >&2; exit 1 ;;
       esac
       if ! printf '%s' "$CALLER_COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
@@ -167,3 +169,13 @@ source:checkout:
 
 .ci-desktop-deepseek:
   extends: [.ci-deepseek, .desktop-suite]
+
+.go-suite:
+  rules:
+    - if: '$CALLER_CI_SUITE == "go-service"'
+
+.ci-go:
+  extends: [.ci-node, .go-suite]
+
+.ci-go-deepseek:
+  extends: [.ci-deepseek, .go-suite]

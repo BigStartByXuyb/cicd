@@ -9,6 +9,7 @@ MW 插件系统共享流水线仓库，包含插件市场与桌面客户端的 G
 - `templates/common.yml` 定义中央流水线阶段、源码检出和共享设置。
 - `templates/plugin-marketplace.yml` 定义插件市场检查、测试、审计、报告和通知任务。
 - `templates/desktop-app.yml` 定义桌面客户端检查、构建、测试、审计、报告和通知任务。
+- `templates/go-service.yml` 定义 Go 服务的结构检查、工具链与交叉编译、运行时测试与覆盖率、审计、报告和通知任务。
 
 中央流水线通过 `CI_JOB_TOKEN` 检出调用仓库的指定提交。每个源码项目必须在 **Settings → CI/CD → Job token permissions** 中允许 `data_ai/cicd`。桌面客户端套件还会检出 `data_ai/plugins` 作为运行时夹具，因此插件项目也必须允许 `data_ai/cicd`。下游流水线按传入的完整 commit SHA 校验检出结果。
 
@@ -27,4 +28,5 @@ Feishu 只发送两类流水线消息：检查结束后向映射的提交者发�
 - `templates/`：中央 GitLab 下游流水线模板。
 - `projects/plugin-marketplace/`：插件市场流水线实现、校验规则和说明。
 - `projects/desktop-app/`：桌面客户端流水线实现、校验规则和说明。
+- `projects/go-service/`：Go 服务流水线实现、校验规则和说明。
 - `shared/`：两套流水线共用的报告和通知实现。
