@@ -73,7 +73,7 @@ go:runtime-tests:
 go:coverage-gate:
   extends: .ci-go
   stage: test
-  needs: ["go:runtime-tests"]
+  needs: ["source:checkout", "go:runtime-tests"]
   when: always
   script:
     - node "$CI_SUITE/scripts/ci/coverage-gate.mjs" --file "$CI_TMP/coverage.out" --root "$CI_CALLER_DIR" --output-json "$CI_TMP/coverage-report.json" --output-text "$CI_TMP/coverage.txt"
