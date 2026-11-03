@@ -62,6 +62,7 @@ go:runtime-tests:
   extends: .ci-go
   image: golang:1.22
   stage: test
+  when: always
   script:
     - cd "$CI_CALLER_DIR"
     - go test -race -covermode=atomic -coverprofile="$CI_TMP/coverage.out" ./...
