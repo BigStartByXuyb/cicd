@@ -163,6 +163,8 @@ plugin:notify-feishu:
   extends: .ci-plugin
   stage: notify
   when: always
+  # 通知是尽力而为，飞书配置缺失/限流不应把质量门禁整体判红。
+  allow_failure: true
   environment: plugin-cicd-notify
   script:
     - node "$CI_SUITE/scripts/ci/build-notify-input.mjs" --findings-dir "$CI_TMP" --output "$CI_TMP/feishu-input.json"

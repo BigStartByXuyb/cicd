@@ -7,6 +7,7 @@ const central = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/p
 const desktop = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/desktop-app.yml'), 'utf8');
 const gitlabCommon = fs.readFileSync(path.resolve(process.cwd(), 'templates/common.yml'), 'utf8');
 const gitlabPluginTemplate = fs.readFileSync(path.resolve(process.cwd(), 'templates/plugin-marketplace.yml'), 'utf8');
+const gitlabDesktopTemplate = fs.readFileSync(path.resolve(process.cwd(), 'templates/desktop-app.yml'), 'utf8');
 // 调用方仓库的 workflow：本地并排放着同级的 plugin-marketplace-worktree 时直接读；
 // 没有那份检出（例如只 clone 了 cicd 本身）就跳过调用方那几条断言 —— 缺检出不是契约失败。
 const callerPath = process.env.CALLER_WORKFLOW ?? path.resolve(process.cwd(), '..', 'plugin-marketplace-worktree/.github/workflows/plugin-cicd.yml');
@@ -42,6 +43,17 @@ test('GitLab plugin runtime jobs install PowerShell for suites that invoke pwsh'
   const pwshJob = gitlabPluginTemplate.match(/plugin:runtime-pwsh:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
   assert.match(jsJob, /CI_INSTALL_PWSH:\s*["']true/);
   assert.match(pwshJob, /CI_INSTALL_PWSH:\s*["']true/);
+});
+
+test('GitLab Feishu notifications are best-effort for every suite', () => {
+  for (const [name, template] of [
+    ['plugin-marketplace', gitlabPluginTemplate],
+    ['desktop-app', gitlabDesktopTemplate],
+  ]) {
+    const normalized = template.replace(/\r\n/g, '\n');
+    const notify = `${normalized}\nend:`.match(/^[a-z-]+:notify-feishu:[\s\S]*?(?=\n[a-z-]+:)/m)?.[0] ?? '';
+    assert.match(notify, /allow_failure:\s*true/, `${name} 的飞书通知不应阻断质量门禁`);
+  }
 });
 
 test('semantic audit reads the workspace on demand instead of inlining plugin sources', () => {
