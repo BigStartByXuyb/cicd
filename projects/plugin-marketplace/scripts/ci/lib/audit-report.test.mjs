@@ -230,6 +230,28 @@ test('reads a finding heading with or without brackets', () => {
   assert.equal(parseAuditReport(lowerTitle).reviewFindings, 1);
 });
 
+test('keeps FIND headings when Severity classifies them and synchronizes the summary', () => {
+  const report = validReport
+    .replace('result: REVIEW', 'result: PASS')
+    .replace('review_findings: 1', 'review_findings: 5')
+    .replace('### [REVIEW-001]', '### FIND-001');
+  const result = parseAuditReport(report);
+
+  assert.equal(result.result, 'REVIEW');
+  assert.equal(result.reviewFindings, 1);
+  assert.equal(result.findings[0].id, 'FIND-001');
+  assert.equal(result.findings[0].severity, 'REVIEW');
+  assert.match(result.notes.join('\n'), /非标准 ID/);
+  assert.match(result.markdown, /^---\n[\s\S]*\nresult: REVIEW\nblocking_findings: 0\nreview_findings: 1\n/);
+});
+
+test('rejects a FIND heading without a usable Severity field', () => {
+  const report = validReport
+    .replace('### [REVIEW-001]', '### FIND-001')
+    .replace('- Severity: `REVIEW`\n', '');
+  assert.throws(() => parseAuditReport(report), /必须用 Severity 明确/);
+});
+
 /*
  * 真实回归（应用套件 PR #51 又一次变红）：模型漏写 `- Confidence:`，旧实现整份判 INVALID。
  * 与漏写证据同类：记一条备注照收；BLOCK 仍必须 high（下面这条断言照旧）。
