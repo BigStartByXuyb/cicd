@@ -2,7 +2,7 @@ const RESULTS = new Set(['PASS', 'REVIEW', 'BLOCK', 'INVALID']);
 const SEVERITIES = new Set(['BLOCK', 'REVIEW']);
 const AUDIT_VERSIONS = new Set(['1', '2']);
 /* 各套件报告的一级标题：写了**别的套件**的标题说明模型套错了契约 —— 那要拒，不能只记备注。 */
-const SUITE_TITLES = ['# 插件语义审计', '# 应用语义审计', '# Plugin Semantic Audit'];
+const SUITE_TITLES = ['# 插件语义审计', '# 应用语义审计', '# Go 服务语义审计', '# Plugin Semantic Audit'];
 const HAN_PATTERN = /\p{Script=Han}/u;
 /*
  * 证据 = 反引号里带行号的引用。接受的写法：

@@ -32,6 +32,38 @@ test('builds deterministic and final reports from machine-readable inputs', () =
   }
 });
 
+test('runtime failures prevent a final PASS or REVIEW conclusion', () => {
+  const isolated = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-ci-runtime-'));
+  try {
+    const inputs = {
+      deterministic: { status: 'PASS', errors: [], plugins: [] },
+      semantic: { result: 'REVIEW', blockingFindings: 0, reviewFindings: 1, findings: [] },
+      runtimeJs: { status: 'failed' },
+      runtimePwsh: { status: 'success' },
+    };
+    for (const [name, value] of Object.entries(inputs)) {
+      fs.writeFileSync(path.join(isolated, `${name}.json`), JSON.stringify(value));
+    }
+    const finalJson = path.join(isolated, 'final.json');
+    const finalMarkdown = path.join(isolated, 'final.md');
+    execFileSync(process.execPath, [
+      path.join(root, 'scripts/ci/build-final-report.mjs'),
+      '--deterministic', path.join(isolated, 'deterministic.json'),
+      '--semantic', path.join(isolated, 'semantic.json'),
+      '--runtime-js', path.join(isolated, 'runtimeJs.json'),
+      '--runtime-pwsh', path.join(isolated, 'runtimePwsh.json'),
+      '--output-json', finalJson,
+      '--output-markdown', finalMarkdown,
+    ]);
+    const report = JSON.parse(fs.readFileSync(finalJson, 'utf8'));
+    assert.equal(report.decision, 'FAILED');
+    assert.equal(report.checks.runtime.javascript, 'failed');
+    assert.match(fs.readFileSync(finalMarkdown, 'utf8'), /JavaScript 运行时测试：\*\*failed\*\*/);
+  } finally {
+    fs.rmSync(isolated, { recursive: true, force: true });
+  }
+});
+
 // 真实回归（plugin-marketplace PR #7）：语义审计返回 INVALID 时，最终结论被渲染成 BLOCK，
 // 而同一条评论里又写着「阻断问题：0」——看起来像代码被阻断。INVALID 必须是它自己的结论。
 test('states INVALID as its own final decision instead of folding it into BLOCK', () => {

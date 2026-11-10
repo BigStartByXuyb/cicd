@@ -52,7 +52,7 @@ test('workflow declares the jobs, pins the CI ref, and references only existing 
   assert.match(WORKFLOW, /parse-app-audit-report\.mjs/);
   assert.match(WORKFLOW, /build-final-report\.mjs/);
   assert.match(WORKFLOW, /notify-feishu\.mjs/);
-  assert.match(WORKFLOW, /post-pr-comment\.mjs/);
+  assert.match(WORKFLOW, /post-review-note\.mjs/);
   // 缺飞书密钥不是失败：通知脚本自己跳过。
   assert.match(WORKFLOW, /FEISHU_APP_ID: \$\{\{ secrets\.FEISHU_APP_ID \}\}/);
   for (const match of WORKFLOW.matchAll(/\$CI_PROJECT_DIR\/scripts\/ci\/([a-z-]+\.mjs)/g)) {

@@ -1,10 +1,13 @@
+import { formatFailedJobs, formatReviewFindings } from '../../../../../shared/ci/audit-summary.mjs';
+
 function shortSha(value) {
   return String(value).slice(0, 12);
 }
 
 function statusFor(input) {
   if ([input.deterministicResult, input.semanticResult].includes('cancelled')) return 'CANCELLED';
-  if (['PASS', 'REVIEW', 'BLOCK', 'INVALID'].includes(input.finalDecision)) return input.finalDecision;
+  if (['PASS', 'REVIEW', 'BLOCK', 'INVALID', 'FAILED'].includes(input.finalDecision)) return input.finalDecision;
+  if (input.finalDecision === 'UNKNOWN') return 'FAILED';
   if (input.deterministicResult !== 'success') return 'FAILED_BEFORE_AUDIT';
   if (input.auditResult === 'BLOCK') return 'BLOCK';
   if (input.auditResult === 'INVALID' || input.semanticResult === 'failure') return 'INVALID';
@@ -31,12 +34,15 @@ export function buildFeishuNotification(input) {
     semanticLine,
     `阻断问题：${input.blockingFindings}`,
     `普通建议：${input.reviewFindings}`,
+    ...formatReviewFindings(input.findings),
+    ...(input.runtimeResult ? [`运行时测试：${input.runtimeResult === 'success' ? 'PASS' : 'FAILED'}`] : []),
+    ...formatFailedJobs(input.failedJobs),
     '',
     `请审阅当前分析结果并在 PR 中反馈。审阅者：${input.reviewerLogins?.join(', ') || '未指定'}`,
     ...(input.unresolvedReviewerLogins?.length
-      ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；已通知默认维护群聊。`]
+      ? [`收件人映射缺失：${input.unresolvedReviewerLogins.join(', ')}；这些审阅者未收到私信。`]
       : []),
-    `查看 PR：${input.reportUrl}`,
+    `查看 CI 审计详情：${input.reportUrl}`,
   ].join('\n');
 
   return {

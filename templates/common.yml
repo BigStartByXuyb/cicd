@@ -1,0 +1,181 @@
+# 两个套件共用的中央下游流水线骨架。调用方只传项目、提交和套件元数据。
+# 中央 source:checkout 使用 CI_JOB_TOKEN 拉取调用方源码；调用方项目必须允许 data_ai/cicd。
+
+stages: [dispatch, source, validate, test, audit, report, notify, acceptance, release]
+
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "plugin-marketplace"'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "desktop-app"'
+    - if: '$CI_PIPELINE_SOURCE == "pipeline" && $CALLER_CI_SUITE == "go-service"'
+
+variables:
+  GIT_DEPTH: "0"
+  CI_TMP: "$CI_PROJECT_DIR/.ci-tmp"
+  CI_IMPL_DIR: "$CI_PROJECT_DIR"
+  CI_SUITE: "$CI_IMPL_DIR/projects/$CALLER_CI_SUITE"
+  CI_CALLER_DIR: "$CI_PROJECT_DIR/.ci-caller"
+  CI_PLUGIN_DIR: "$CI_PROJECT_DIR/.ci-plugin-fixture"
+  BASE_SHA: "$CALLER_BASE_SHA"
+  HEAD_SHA: "$CALLER_COMMIT_SHA"
+  NODE_IMAGE: "node:22"
+  ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
+  ANTHROPIC_MODEL: "claude-sonnet-4-6"
+  CLAUDE_CODE_MAX_OUTPUT_TOKENS: "64000"
+  ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-sonnet-4-6"
+  ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-4-6"
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-sonnet-4-6"
+  CLAUDE_CODE_SUBAGENT_MODEL: "claude-sonnet-4-6"
+
+.ci-setup:
+  before_script:
+    - |
+      if ! command -v git >/dev/null 2>&1; then
+        if ! command -v apt-get >/dev/null 2>&1; then
+          echo "CI image requires git and apt-get to install it" >&2
+          exit 1
+        fi
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y git
+      fi
+      if [ "${CI_INSTALL_PWSH:-false}" = "true" ] && ! command -v pwsh >/dev/null 2>&1; then
+        . /etc/os-release
+        if [ "$ID" != "debian" ] || [ "$VERSION_ID" != "12" ]; then
+          echo "PowerShell 7 install expects Debian 12; found $ID $VERSION_ID" >&2
+          exit 1
+        fi
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y wget
+        wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
+        dpkg -i /tmp/packages-microsoft-prod.deb
+        rm -f /tmp/packages-microsoft-prod.deb
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y powershell
+      fi
+    - mkdir -p "$CI_TMP"
+
+.ci-notify:
+  image: $NODE_IMAGE
+  interruptible: true
+  environment: ci-notify
+  dependencies: []
+  before_script:
+    - unset CI_JOB_TOKEN
+
+pipeline:admin-acceptance:
+  extends: .ci-notify
+  stage: acceptance
+  rules:
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app" || $CALLER_CI_SUITE == "go-service"'
+  script:
+    - node "$CI_IMPL_DIR/shared/ci/send-admin-acceptance.mjs"
+
+source:checkout:
+  extends: .ci-setup
+  image: $NODE_IMAGE
+  stage: source
+  rules:
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace" || $CALLER_CI_SUITE == "desktop-app" || $CALLER_CI_SUITE == "go-service"'
+  script:
+    - |
+      case "$CALLER_CI_SUITE:$CALLER_PROJECT_PATH" in
+        plugin-marketplace:data_ai/plugins) ;;
+        desktop-app:data_ai/mastergo-transcoder-gui) ;;
+        go-service:data_ai/svc_monitor) ;;
+        *) echo "不支持的套件/源码仓库组合" >&2; exit 1 ;;
+      esac
+      if ! printf '%s' "$CALLER_COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+        echo "CALLER_COMMIT_SHA 必须是完整 commit SHA" >&2
+        exit 1
+      fi
+      host_port="${CI_SERVER_URL#*://}"
+      source_url="${CI_SERVER_PROTOCOL}://${host_port}/${CALLER_PROJECT_PATH}.git"
+      job_auth="$(printf 'gitlab-ci-token:%s' "$CI_JOB_TOKEN" | base64 | tr -d '\n')"
+      git_auth_header="Authorization: Basic $job_auth"
+      git -c http.extraHeader="$git_auth_header" clone --quiet --no-checkout "$source_url" "$CI_CALLER_DIR"
+      if [ -n "$CALLER_MR_IID" ]; then
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="$git_auth_header" fetch --quiet origin "refs/merge-requests/${CALLER_MR_IID}/head"
+      else
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="$git_auth_header" fetch --quiet origin "$CALLER_REF_NAME"
+      fi
+      git -C "$CI_CALLER_DIR" checkout --quiet --detach "$CALLER_COMMIT_SHA"
+      actual_sha="$(git -C "$CI_CALLER_DIR" rev-parse HEAD)"
+      if [ "$actual_sha" != "$CALLER_COMMIT_SHA" ]; then
+        echo "取回的源码提交与调用方传入提交不一致" >&2
+        exit 1
+      fi
+      if [ -n "$CALLER_MR_TARGET_BRANCH" ]; then
+        git -C "$CI_CALLER_DIR" -c http.extraHeader="$git_auth_header" fetch --quiet origin "$CALLER_MR_TARGET_BRANCH"
+      fi
+      if [ -n "$CALLER_BASE_SHA" ] && [ "$CALLER_BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+        git -C "$CI_CALLER_DIR" cat-file -e "${CALLER_BASE_SHA}^{commit}"
+      fi
+      if [ "$CALLER_CI_SUITE" = "desktop-app" ]; then
+        git -c http.extraHeader="$git_auth_header" clone --quiet "${CI_SERVER_PROTOCOL}://${host_port}/data_ai/plugins.git" "$CI_PLUGIN_DIR"
+      fi
+      unset CI_JOB_TOKEN job_auth git_auth_header
+      tar -czf "$CI_PROJECT_DIR/caller-source.tar.gz" -C "$CI_CALLER_DIR" .
+      if [ "$CALLER_CI_SUITE" = "desktop-app" ]; then
+        tar -czf "$CI_PROJECT_DIR/plugin-fixture.tar.gz" -C "$CI_PLUGIN_DIR" .
+      fi
+  artifacts:
+    paths:
+      - caller-source.tar.gz
+      - plugin-fixture.tar.gz
+    expire_in: 1 day
+
+.ci-node:
+  extends: .ci-setup
+  image: $NODE_IMAGE
+  interruptible: true
+  before_script:
+    - !reference [.ci-setup, before_script]
+    - export BASE_SHA="${CALLER_BASE_SHA:-$CALLER_PREVIOUS_SHA}"
+    - export HEAD_SHA="$CALLER_COMMIT_SHA"
+    - mkdir -p "$CI_CALLER_DIR"
+    - tar -xzf "$CI_PROJECT_DIR/caller-source.tar.gz" -C "$CI_CALLER_DIR"
+    - if [ -f "$CI_PROJECT_DIR/plugin-fixture.tar.gz" ]; then mkdir -p "$CI_PLUGIN_DIR"; tar -xzf "$CI_PROJECT_DIR/plugin-fixture.tar.gz" -C "$CI_PLUGIN_DIR"; fi
+    - unset CI_JOB_TOKEN
+
+.ci-deepseek:
+  extends: .ci-node
+  before_script:
+    - !reference [.ci-node, before_script]
+    - |
+      if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        echo "缺少 ANTHROPIC_API_KEY：仓库还没配置 DeepSeek API key。" >&2
+        exit 1
+      fi
+      export ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_API_KEY"
+
+.plugin-suite:
+  rules:
+    - if: '$CALLER_CI_SUITE == "plugin-marketplace"'
+
+.desktop-suite:
+  rules:
+    - if: '$CALLER_CI_SUITE == "desktop-app"'
+
+.ci-plugin:
+  extends: [.ci-node, .plugin-suite]
+
+.ci-plugin-deepseek:
+  extends: [.ci-deepseek, .plugin-suite]
+
+.ci-desktop:
+  extends: [.ci-node, .desktop-suite]
+
+.ci-desktop-deepseek:
+  extends: [.ci-deepseek, .desktop-suite]
+
+.go-suite:
+  rules:
+    - if: '$CALLER_CI_SUITE == "go-service"'
+
+.ci-go:
+  extends: [.ci-node, .go-suite]
+
+.ci-go-deepseek:
+  extends: [.ci-deepseek, .go-suite]

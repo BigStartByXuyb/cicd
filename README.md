@@ -1,60 +1,32 @@
-# BigStart CI/CD
+# MW 插件系统 CI/CD
 
-This repository hosts reusable GitHub Actions workflows for multiple projects.
+MW 插件系统共享流水线仓库，包含插件市场与桌面客户端的 GitLab CI 模板、GitHub Actions 工作流和校验脚本。
 
-The reusable workflow supports two deployment modes. For the current personal
-account pilot, the caller repository stores five repository-level Actions
-Secrets and passes them explicitly through `workflow_call`. For team use,
-both repositories can later move into one GitHub Organization and the same
-names can be supplied as allow-listed Organization Secrets. Secret values
-never live in this repository.
+## GitLab CI
 
-## Layout
+调用仓库的 `.gitlab-ci.yml` 只触发本仓库的下游流水线，并传入仓库路径、提交 SHA、MR 元数据和套件名。实际 job 全部在本仓库运行：
 
-```text
-.github/workflows/                 # GitHub requires reusable workflows here
-  plugin-marketplace.yml            # entry point for plugin marketplace
-  desktop-app.yml                   # entry point for desktop/client apps
-projects/
-  plugin-marketplace/               # one complete CI/CD suite
-    scripts/ci/
-    docs/
-  desktop-app/                      # Node backend + React frontend clients
-    scripts/ci/
-    docs/
-shared/ci/                          # cross-suite utilities (Feishu send, PR comment)
-```
+- `templates/common.yml` 定义中央流水线阶段、源码检出和共享设置。
+- `templates/plugin-marketplace.yml` 定义插件市场检查、测试、审计、报告和通知任务。
+- `templates/desktop-app.yml` 定义桌面客户端检查、构建、测试、审计、报告和通知任务。
+- `templates/go-service.yml` 定义 Go 服务的结构检查、工具链与交叉编译、运行时测试与覆盖率、审计、报告和通知任务。
 
-The desktop-app suite gates unit tests, coverage thresholds, hardcoded machine paths, orphan
-exports, layering, build-output consistency, and a DeepSeek-backed Claude semantic audit whose
-contract lives in `projects/desktop-app/docs/app-semantic-audit.md`. Callers pin `ci_ref` to a
-commit SHA so a change to the CI logic is always an explicit change on their side.
+中央流水线通过 `CI_JOB_TOKEN` 检出调用仓库的指定提交。每个源码项目必须在 **Settings → CI/CD → Job token permissions** 中允许 `data_ai/cicd`。桌面客户端套件还会检出 `data_ai/plugins` 作为运行时夹具，因此插件项目也必须允许 `data_ai/cicd`。下游流水线按传入的完整 commit SHA 校验检出结果。
 
-The marketplace repository currently calls:
+触发用户必须有权限在本项目启动下游流水线。密钥统一配置在本项目的 CI/CD Variables，并按用途隔离环境作用域：`*-audit` 配置 `ANTHROPIC_API_KEY`；`*-notify` 配置 `GITLAB_API_TOKEN`、`FEISHU_ADMIN_GITLAB_LOGINS`，以及 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_RECIPIENT_MAP_JSON`。未配置完整飞书凭据或收件人映射时通知会跳过，不阻断代码检查。这些值不存放在仓库中；敏感变量使用 Masked 和 Protected。
 
-```text
-BigStartByXuyb/cicd/.github/workflows/plugin-marketplace.yml@d71a86e97e737f8bb48fc4f999cf1e52820bc598
-```
+Feishu 只发送两类流水线消息：检查结束后向映射的提交者发送一次最终 CI 结论；所有检查和语义审计均为 `PASS` 时，末尾验收阶段向 `FEISHU_ADMIN_GITLAB_LOGINS` 指定且已映射的管理员发送验收通知。`REVIEW` 虽不阻断 GitLab pipeline，但不算完整 `PASS`，不会触发管理员验收通知。最终结论包含普通建议标题、失败 job 直达链接和脱敏后的错误摘要，并链接到 GitLab MR 报告或报告 job 日志。收件人由 GitLab 登录名到飞书 `open_id` 的映射确定，不依赖群聊。
 
-After the repositories are transferred to the team Organization, replace the
-owner in the caller workflow with that Organization slug and keep pinning a
-reviewed commit SHA.
+源码检出 job 只准备源码 artifact，不运行调用仓库代码；执行仓库代码的 job 不保留 `CI_JOB_TOKEN`。GitLab API 令牌仅用于回写调用仓库的 MR 报告，并须有对应项目的 MR notes 权限。
 
-The reusable workflow requires these five Organization Secrets to be mapped
-explicitly by the caller:
+## GitHub Actions
 
-```text
-ANTHROPIC_API_KEY
-FEISHU_APP_ID
-FEISHU_APP_SECRET
-FEISHU_DEFAULT_CHAT_ID
-FEISHU_RECIPIENT_MAP_JSON
-```
+`.github/workflows/` 保留插件市场和桌面客户端的 GitHub Actions 入口；套件实现位于 `projects/`，共用实现位于 `shared/`。
 
-For the personal pilot, configure the five names in the caller repository
-(`BigStartByXuyb/test`) under Settings → Secrets and variables → Actions →
-Repository secrets. The old Environment `plugin-cicd-prod` in `cicd` is not a
-runtime source for a reusable workflow called by another repository. It may
-be kept temporarily, but it must not be treated as the caller's configuration.
+## 目录
 
-Plugin source code stays in the marketplace repository. This repository only checks out the caller repository temporarily during a run; it does not store submitted plugins.
+- `templates/`：中央 GitLab 下游流水线模板。
+- `projects/plugin-marketplace/`：插件市场流水线实现、校验规则和说明。
+- `projects/desktop-app/`：桌面客户端流水线实现、校验规则和说明。
+- `projects/go-service/`：Go 服务流水线实现、校验规则和说明。
+- `shared/`：两套流水线共用的报告和通知实现。

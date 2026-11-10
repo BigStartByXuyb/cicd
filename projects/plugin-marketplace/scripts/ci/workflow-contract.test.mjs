@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const central = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/plugin-marketplace.yml'), 'utf8');
+const desktop = fs.readFileSync(path.resolve(process.cwd(), '.github/workflows/desktop-app.yml'), 'utf8');
+const gitlabCommon = fs.readFileSync(path.resolve(process.cwd(), 'templates/common.yml'), 'utf8');
+const gitlabPluginTemplate = fs.readFileSync(path.resolve(process.cwd(), 'templates/plugin-marketplace.yml'), 'utf8');
+const gitlabDesktopTemplate = fs.readFileSync(path.resolve(process.cwd(), 'templates/desktop-app.yml'), 'utf8');
 // 调用方仓库的 workflow：本地并排放着同级的 plugin-marketplace-worktree 时直接读；
 // 没有那份检出（例如只 clone 了 cicd 本身）就跳过调用方那几条断言 —— 缺检出不是契约失败。
 const callerPath = process.env.CALLER_WORKFLOW ?? path.resolve(process.cwd(), '..', 'plugin-marketplace-worktree/.github/workflows/plugin-cicd.yml');
@@ -17,10 +21,39 @@ test('central workflow declares every required workflow-call secret', () => {
   assert.doesNotMatch(central, /environment:\s*plugin-cicd-prod/);
 });
 
-test('semantic audit permits the configured DeepSeek model alias', () => {
+test('semantic audit uses the DeepSeek Flash Anthropic alias through Claude Code environment settings', () => {
+  for (const config of [central, desktop, gitlabCommon]) {
+    for (const name of [
+      'ANTHROPIC_MODEL',
+      'ANTHROPIC_DEFAULT_OPUS_MODEL',
+      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+      'CLAUDE_CODE_SUBAGENT_MODEL',
+    ]) {
+      assert.match(config, new RegExp(`${name}:\\s*['"]?claude-sonnet-4-6`));
+    }
+    assert.doesNotMatch(config, /ANTHROPIC_(?:DEFAULT_\w+_)?MODEL:\s*['"]?deepseek-flash/);
+    assert.match(config, /CLAUDE_CODE_MAX_OUTPUT_TOKENS:\s*['"]?64000/);
+  }
   assert.match(central, /CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT:\s*['"]?1['"]?/);
-  assert.match(central, /--model\s+claude-sonnet-4-6/);
-  assert.doesNotMatch(central, /--model\s+deepseek-v4-flash/);
+});
+
+test('GitLab plugin runtime jobs install PowerShell for suites that invoke pwsh', () => {
+  const jsJob = gitlabPluginTemplate.match(/plugin:runtime-js:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
+  const pwshJob = gitlabPluginTemplate.match(/plugin:runtime-pwsh:[\s\S]*?(?=\nplugin:|\n#)/)?.[0] ?? '';
+  assert.match(jsJob, /CI_INSTALL_PWSH:\s*["']true/);
+  assert.match(pwshJob, /CI_INSTALL_PWSH:\s*["']true/);
+});
+
+test('GitLab Feishu notifications are best-effort for every suite', () => {
+  for (const [name, template] of [
+    ['plugin-marketplace', gitlabPluginTemplate],
+    ['desktop-app', gitlabDesktopTemplate],
+  ]) {
+    const normalized = template.replace(/\r\n/g, '\n');
+    const notify = `${normalized}\nend:`.match(/^[a-z-]+:notify-feishu:[\s\S]*?(?=\n[a-z-]+:)/m)?.[0] ?? '';
+    assert.match(notify, /allow_failure:\s*true/, `${name} 的飞书通知不应阻断质量门禁`);
+  }
 });
 
 test('semantic audit reads the workspace on demand instead of inlining plugin sources', () => {
@@ -64,8 +97,9 @@ test('caller passes exactly the required secret names', () => {
     // 没检出调用方仓库：只在这里跳过，其余断言仍读本仓库的 reusable workflow。
     return;
   }
-  const block = caller.match(/\n\s+secrets:\n([\s\S]*?)(?=\n\S|$)/)?.[1] ?? '';
-  const actual = [...block.matchAll(/^\s{6}([A-Z0-9_]+):/gm)].map((m) => m[1]);
+  // 调用方仓库的行尾由各自平台决定：两种行尾都要认。
+  const block = caller.match(/\r?\n\s+secrets:\r?\n([\s\S]*?)(?=\r?\n\S|$)/)?.[1] ?? '';
+  const actual = [...block.matchAll(/^ {6}([A-Z0-9_]+):/gm)].map((m) => m[1]);
   assert.deepEqual(actual, names);
   assert.doesNotMatch(caller, /secrets:\s*inherit/);
 });

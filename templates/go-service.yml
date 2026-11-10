@@ -1,0 +1,181 @@
+# Go 服务套件：结构与工具链检查、运行时测试与覆盖率、语义审计、报告与通知。
+#
+# 各 job 的密钥环境作用域见仓库 README。覆盖率统计范围默认 internal/，
+# 阈值默认 70%（总）/ 60%（单包），可在调用方 ci/coverage.json 覆盖。
+
+go:structure:
+  extends: .ci-go
+  stage: validate
+  script:
+    - node "$CI_SUITE/scripts/ci/check-go-structure.mjs" --root "$CI_CALLER_DIR" --output "$CI_TMP/deterministic-structure.json" --markdown "$CI_TMP/deterministic-structure.md"
+    - |
+      if [ -d "$CI_CALLER_DIR/internal/webui/assets" ]; then
+        npx --yes prettier@3.3.3 --check "$CI_CALLER_DIR/internal/webui/assets"
+      elif [ -d "$CI_CALLER_DIR/web" ]; then
+        npx --yes prettier@3.3.3 --check "$CI_CALLER_DIR/web"
+      fi
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 工具链检查在 golang 镜像里跑，不执行仓库里的任意代码：只做 gofmt / vet / tidy / 交叉编译。
+go:toolchain:
+  extends: .ci-go
+  image: golang:1.22
+  stage: validate
+  script:
+    - |
+      cd "$CI_CALLER_DIR"
+      failures="$CI_TMP/toolchain-failures.txt"
+      : > "$failures"
+      log="$CI_TMP/toolchain.log"
+      : > "$log"
+      check() {
+        name="$1"; shift
+        echo "== $name ==" >>"$log"
+        if "$@" >>"$log" 2>&1; then echo "PASS $name"; else echo "FAIL $name"; echo "$name" >>"$failures"; fi
+      }
+      check gofmt sh -c 'files=$(git ls-files "*.go" | xargs -r gofmt -l); if [ -n "$files" ]; then printf "%s\n" "$files"; exit 1; fi'
+      check vet go vet ./...
+      check tidy sh -c 'go mod tidy && test -z "$(git status --porcelain -- go.mod go.sum)"'
+      check build-linux sh -c 'GOOS=linux GOARCH=amd64 go build -trimpath ./...'
+      check build-windows sh -c 'GOOS=windows GOARCH=amd64 go build -trimpath ./...'
+      if [ -s "$failures" ]; then
+        printf '{"status":"FAIL","checks":[{"name":"go-toolchain","title":"Go 工具链检查","status":"FAIL","findings":[' > "$CI_TMP/deterministic-toolchain.json"
+        first=1
+        while IFS= read -r name; do
+          [ "$first" -eq 1 ] || printf ',' >> "$CI_TMP/deterministic-toolchain.json"
+          first=0
+          printf '{"check":"go-toolchain","path":"","line":0,"message":"%s 未通过"}' "$name" >> "$CI_TMP/deterministic-toolchain.json"
+        done < "$failures"
+        printf ']}],"findings":[]}\n' >> "$CI_TMP/deterministic-toolchain.json"
+        cat "$CI_TMP/deterministic-toolchain.json"
+        exit 1
+      fi
+      printf '{"status":"PASS","checks":[{"name":"go-toolchain","title":"Go 工具链检查","status":"PASS","findings":[]}],"findings":[]}\n' > "$CI_TMP/deterministic-toolchain.json"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 真的把用例跑一遍。执行的是仓库里的代码，所以不挂密钥环境。
+go:runtime-tests:
+  extends: .ci-go
+  image: golang:1.22
+  stage: test
+  when: always
+  script:
+    - cd "$CI_CALLER_DIR"
+    - go test -race -covermode=atomic -coverprofile="$CI_TMP/coverage.out" ./...
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 覆盖率门禁在 node 镜像里解析 profile：阈值与统计范围属于被审仓库，不在 CI 脚本里写死口径。
+go:coverage-gate:
+  extends: .ci-go
+  stage: test
+  needs: ["source:checkout", "go:runtime-tests"]
+  when: always
+  script:
+    - node "$CI_SUITE/scripts/ci/coverage-gate.mjs" --file "$CI_TMP/coverage.out" --root "$CI_CALLER_DIR" --output-json "$CI_TMP/coverage-report.json" --output-text "$CI_TMP/coverage.txt"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 语义审计：覆盖率产物由前一阶段带过来，拼进审计上下文。
+# 审计没产出可用报告时按 INVALID 记（下游汇总据此判），不能落成 PASS。
+go:semantic-audit:
+  extends: .ci-go-deepseek
+  stage: audit
+  when: always
+  environment: go-cicd-audit
+  variables:
+    CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
+  script:
+    - npm install --global @anthropic-ai/claude-code@2.1.263
+    - |
+      coverage_args=""
+      if [ -f "$CI_TMP/coverage.txt" ]; then coverage_args="--coverage-report $CI_TMP/coverage.txt"; fi
+      node "$CI_SUITE/scripts/ci/build-audit-context.mjs" \
+        --root "$CI_CALLER_DIR" \
+        --git-root "$CI_CALLER_DIR" \
+        --base "$BASE_SHA" \
+        --head "$HEAD_SHA" \
+        --output "$CI_TMP/audit-context.md" \
+        --diff-output "$CI_TMP/audit-diff.patch" \
+        $coverage_args
+    - |
+      set +e
+      cd "$CI_CALLER_DIR"
+      claude --bare --no-session-persistence --permission-prompts none \
+        --tools "Read" \
+        --add-dir "$CI_TMP" \
+        --output-format text \
+        -p "$(cat "$CI_SUITE/docs/go-semantic-audit.md")" \
+        < "$CI_TMP/audit-context.md" > "$CI_TMP/audit-report.md" 2> "$CI_TMP/audit-cli.log"
+      status=$?
+      set -e
+      if [ "$status" -ne 0 ]; then echo "claude 退出码 $status；CLI 日志："; cat "$CI_TMP/audit-cli.log" || true; fi
+    - |
+      node "$CI_SUITE/scripts/ci/parse-go-audit-report.mjs" \
+        --input "$CI_TMP/audit-report.md" \
+        --output-json "$CI_TMP/semantic-report.json" \
+        --output-markdown "$CI_TMP/semantic-report.md" || true
+      result=$(node -e "const fs=require('node:fs');const file='$CI_TMP/semantic-report.json';console.log(fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')).result:'INVALID')")
+      echo "语义审计结论：$result"
+      cat "$CI_TMP/semantic-report.md" 2>/dev/null || true
+      if [ "$result" != "PASS" ] && [ "$result" != "REVIEW" ]; then echo "语义审计未通过：result=$result"; exit 1; fi
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 汇总前序结论。任何 job 失败也要出报告，结论如实反映原因。
+go:final-report:
+  extends: .ci-go
+  stage: report
+  when: always
+  script:
+    - |
+      args=(--output-json "$CI_TMP/final-report.json" --output-markdown "$CI_TMP/final-report.md")
+      # 运行时测试没跑到覆盖率那一步，就按「单元测试或覆盖率门禁未通过」记进汇总。
+      if [ ! -f "$CI_TMP/coverage.txt" ]; then
+        printf '{"status":"FAIL","checks":[{"name":"runtime-tests","title":"运行时测试与覆盖率门禁","status":"FAIL","findings":[{"check":"runtime-tests","path":"","line":0,"message":"单元测试或覆盖率门禁未通过"}]}],"findings":[]}\n' > "$CI_TMP/runtime-report.json"
+        args+=(--deterministic "$CI_TMP/runtime-report.json")
+      fi
+      if [ -f "$CI_TMP/deterministic-structure.json" ]; then args+=(--deterministic "$CI_TMP/deterministic-structure.json"); fi
+      if [ -f "$CI_TMP/deterministic-toolchain.json" ]; then args+=(--deterministic "$CI_TMP/deterministic-toolchain.json"); fi
+      # 审计没产出报告时按 INVALID 记，不能落成 PASS。
+      if [ ! -f "$CI_TMP/semantic-report.json" ]; then
+        printf '{"result":"INVALID","blockingFindings":0,"reviewFindings":0,"findings":[],"error":"语义审计未产出可用报告"}\n' > "$CI_TMP/semantic-invalid.json"
+        args+=(--semantic "$CI_TMP/semantic-invalid.json")
+      else
+        args+=(--semantic "$CI_TMP/semantic-report.json")
+      fi
+      if [ -f "$CI_TMP/semantic-report.md" ]; then args+=(--semantic-markdown "$CI_TMP/semantic-report.md"); fi
+      node "$CI_SUITE/scripts/ci/build-final-report.mjs" "${args[@]}"
+      cat "$CI_TMP/final-report.md"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+go:mr-note:
+  extends: .ci-go
+  stage: notify
+  when: always
+  environment: go-cicd-notify
+  script:
+    - |
+      if [ -z "$CALLER_MR_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
+      node -e "const fs=require('node:fs');const file='$CI_TMP/final-report.md';const markdown=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'# Go 服务 CI/CD 报告\n\n- 最终报告未生成';fs.writeFileSync('$CI_TMP/note-input.json',JSON.stringify({markdown}))"
+      node "$CI_SUITE/scripts/ci/post-review-note.mjs" --input "$CI_TMP/note-input.json"
+
+go:notify-feishu:
+  extends: .ci-go
+  stage: notify
+  when: always
+  # 通知是尽力而为，飞书配置缺失/限流不应把质量门禁整体判红。
+  allow_failure: true
+  environment: go-cicd-notify
+  script:
+    - node "$CI_SUITE/scripts/ci/build-notify-input.mjs" --findings-dir "$CI_TMP" --output "$CI_TMP/feishu-input.json"
+    - node "$CI_SUITE/scripts/ci/notify-feishu.mjs" --input "$CI_TMP/feishu-input.json"

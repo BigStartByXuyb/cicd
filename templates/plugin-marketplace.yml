@@ -1,0 +1,171 @@
+# 插件市场 CI/CD（模块）：结构与配置检查 → 运行时测试 → 语义审计 → 汇总 → MR 评论 → 飞书通知。
+# 本文件由中央 .gitlab-ci.yml 引入，只包含插件市场 job 定义。
+#
+# 各 job 的密钥环境作用域见仓库 README。
+
+plugin:deterministic:
+  extends: .ci-plugin
+  stage: validate
+  script:
+    - node "$CI_SUITE/scripts/ci/collect-changed-plugins.mjs" > "$CI_TMP/changed-plugins.json"
+    - |
+      set +e
+      node "$CI_SUITE/scripts/ci/validate-marketplace.mjs" --root "$CI_CALLER_DIR" > "$CI_TMP/deterministic-validation.json"
+      validate_status=$?
+      set -e
+      # 校验没产出结果时也要有一份可汇总的输入，否则汇总会拿到空文件。
+      [ -s "$CI_TMP/deterministic-validation.json" ] || printf '{"valid":false,"errors":["validation did not produce a result"],"plugins":[]}\n' > "$CI_TMP/deterministic-validation.json"
+      node "$CI_SUITE/scripts/ci/build-deterministic-report.mjs" \
+        --input "$CI_TMP/deterministic-validation.json" \
+        --plugins-json "$(cat "$CI_TMP/changed-plugins.json")" \
+        --output-json "$CI_TMP/deterministic-report.json" \
+        --output-markdown "$CI_TMP/deterministic-report.md"
+      exit $validate_status
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+# 无密钥的运行时回归：插件自带的 JS 用例真的跑一遍。执行的是仓库里的代码，所以不挂密钥环境。
+plugin:runtime-js:
+  extends: .ci-plugin
+  stage: test
+  variables:
+    CI_INSTALL_PWSH: "true"
+  script:
+    - |
+      cd "$CI_CALLER_DIR"
+      files=$(find plugins -path '*/scripts/tests/*.test.js' | sort)
+      if [ -z "$files" ]; then echo "plugins/**/scripts/tests/*.test.js 未匹配到任何用例"; exit 1; fi
+      echo "$files"
+      set +e
+      node --test $files
+      status=$?
+      set -e
+      runtime_status=failed
+      if [ "$status" -eq 0 ]; then runtime_status=success; fi
+      printf '{"status":"%s"}\n' "$runtime_status" > "$CI_TMP/runtime-js.json"
+      exit "$status"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/runtime-js.json"]
+
+# 插件自带的 PowerShell 用例：在 Node 镜像里安装 PowerShell 7。
+plugin:runtime-pwsh:
+  extends: .ci-plugin
+  stage: test
+  variables:
+    CI_INSTALL_PWSH: "true"
+  script:
+    - |
+      cd "$CI_CALLER_DIR"
+      files=$(find plugins -path '*/skills/*/scripts/tests/*.tests.ps1' | sort)
+      if [ -z "$files" ]; then echo "plugins/**/skills/*/scripts/tests/*.tests.ps1 未匹配到任何用例"; exit 1; fi
+      echo "$files"
+      failed=""
+      for file in $files; do
+        pwsh -NoProfile -File "$file" || failed="$failed $file"
+      done
+      if [ -n "$failed" ]; then
+        echo "PowerShell 用例失败:$failed"
+        printf '{"status":"failed"}\n' > "$CI_TMP/runtime-pwsh.json"
+        exit 1
+      fi
+      printf '{"status":"success"}\n' > "$CI_TMP/runtime-pwsh.json"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/runtime-pwsh.json"]
+
+# 语义审计：读上下文、调 DeepSeek 的 Anthropic 兼容端点，只读不执行仓库代码。
+# 确定性校验没过时这一关不跑（needs 决定），与调用方的门禁口径一致。
+plugin:semantic-audit:
+  extends: .ci-plugin-deepseek
+  stage: audit
+  needs:
+    - job: source:checkout
+      artifacts: true
+    - job: plugin:deterministic
+      artifacts: true
+  environment: plugin-cicd-audit
+  variables:
+    CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1"
+  script:
+    - npm install --global @anthropic-ai/claude-code@2.1.263
+    - |
+      plugin_args=""
+      for plugin in $(node -e "for (const name of JSON.parse(require('node:fs').readFileSync('$CI_TMP/changed-plugins.json','utf8'))) console.log(name)"); do
+        plugin_args="$plugin_args --plugin $plugin"
+      done
+      node "$CI_SUITE/scripts/ci/build-audit-context.mjs" \
+        --root "$CI_CALLER_DIR" \
+        --git-root "$CI_CALLER_DIR" \
+        --base "$BASE_SHA" \
+        --head "$HEAD_SHA" \
+        --contract-root "$CI_SUITE" \
+        --output "$CI_TMP/audit-context.md" \
+        --diff-output "$CI_TMP/audit-diff.patch" \
+        $plugin_args
+    - |
+      set +e
+      cd "$CI_CALLER_DIR"
+      claude --bare --no-session-persistence --permission-prompts none \
+        --tools "Read,Grep,Glob" \
+        --add-dir "$CI_TMP" \
+        --output-format text \
+        -p "$(cat "$CI_SUITE/docs/plugin-semantic-audit.md")" \
+        < "$CI_TMP/audit-context.md" > "$CI_TMP/audit-report.md" 2> "$CI_TMP/audit-cli.log"
+      status=$?
+      set -e
+      if [ "$status" -ne 0 ]; then echo "claude 退出码 $status；CLI 日志："; cat "$CI_TMP/audit-cli.log" || true; exit "$status"; fi
+    - |
+      set +e
+      node "$CI_SUITE/scripts/ci/parse-plugin-audit-report.mjs" \
+        --input "$CI_TMP/audit-report.md" \
+        --output-json "$CI_TMP/semantic-report.json" \
+        --output-markdown "$CI_TMP/semantic-report.md"
+      parse_status=$?
+      set -e
+      echo "语义审计结论：$(node -e "const fs=require('node:fs');const file='$CI_TMP/semantic-report.json';console.log(fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')).result:'INVALID')")"
+      exit $parse_status
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+plugin:final-report:
+  extends: .ci-plugin
+  stage: report
+  when: always
+  script:
+    - |
+      plugins_json="$(cat "$CI_TMP/changed-plugins.json" 2>/dev/null || echo '[]')"
+      args=(--plugins-json "$plugins_json" --output-json "$CI_TMP/final-report.json" --output-markdown "$CI_TMP/final-report.md")
+      args+=(--runtime-js "$CI_TMP/runtime-js.json" --runtime-pwsh "$CI_TMP/runtime-pwsh.json")
+      if [ -f "$CI_TMP/deterministic-report.json" ]; then args+=(--deterministic "$CI_TMP/deterministic-report.json"); fi
+      if [ -f "$CI_TMP/semantic-report.json" ]; then args+=(--semantic "$CI_TMP/semantic-report.json"); fi
+      if [ -f "$CI_TMP/semantic-report.md" ]; then args+=(--semantic-markdown "$CI_TMP/semantic-report.md"); fi
+      node "$CI_SUITE/scripts/ci/build-final-report.mjs" "${args[@]}"
+      cat "$CI_TMP/final-report.md"
+  artifacts:
+    when: always
+    paths: [".ci-tmp/"]
+
+plugin:mr-note:
+  extends: .ci-plugin
+  stage: notify
+  when: always
+  environment: plugin-cicd-notify
+  script:
+    - |
+      if [ -z "$CALLER_MR_IID" ]; then echo "非 MR 流水线：跳过 MR 评论"; exit 0; fi
+      node -e "const fs=require('node:fs');const file='$CI_TMP/final-report.md';const markdown=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'# 插件 CI/CD 报告\n\n- 最终报告未生成';fs.writeFileSync('$CI_TMP/note-input.json',JSON.stringify({markdown}))"
+      node "$CI_SUITE/scripts/ci/post-review-note.mjs" --input "$CI_TMP/note-input.json"
+
+plugin:notify-feishu:
+  extends: .ci-plugin
+  stage: notify
+  when: always
+  # 通知是尽力而为，飞书配置缺失/限流不应把质量门禁整体判红。
+  allow_failure: true
+  environment: plugin-cicd-notify
+  script:
+    - node "$CI_SUITE/scripts/ci/build-notify-input.mjs" --findings-dir "$CI_TMP" --output "$CI_TMP/feishu-input.json"
+    - node "$CI_SUITE/scripts/ci/notify-feishu.mjs" --input "$CI_TMP/feishu-input.json"
