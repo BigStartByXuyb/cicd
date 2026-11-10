@@ -28,6 +28,29 @@ export function normalizeAuditMarkdown(markdown) {
   return source.slice(start).trim();
 }
 
+// 审计产物以解析出的 findings 为准；摘要字段与正文冲突时，把产物 front matter 同步成同一口径。
+function synchronizeSummary(markdown, summary) {
+  const lines = String(markdown ?? '').split(/\r?\n/);
+  for (let start = 0; start < lines.length; start += 1) {
+    if (lines[start].trim() !== '---') continue;
+    for (let end = start + 1; end < lines.length; end += 1) {
+      if (lines[end].trim() !== '---') continue;
+      if (!lines.slice(start + 1, end).some((line) => /^result:\s*/.test(line))) break;
+      const values = {
+        result: summary.result,
+        blocking_findings: String(summary.blockingFindings),
+        review_findings: String(summary.reviewFindings)
+      };
+      for (let index = start + 1; index < end; index += 1) {
+        const field = lines[index].match(/^([a-z_]+):\s*/);
+        if (field && Object.hasOwn(values, field[1])) lines[index] = `${field[1]}: ${values[field[1]]}`;
+      }
+      return lines.join('\n');
+    }
+  }
+  return markdown;
+}
+
 function parseFrontMatterBody(lines) {
   const values = {};
   let listKey = null;
@@ -122,10 +145,12 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   const findings = [];
   /*
    * 标题是给人读的：`### [REVIEW-001] 标题` 与 `### REVIEW-001` 都是**一条 finding**（模型时写时不写方括号）。
+   * 模型偶尔会把 ID 写成 `FIND-001`；只要 Severity 明确，仍按同一条 finding 处理并记格式偏差，
+   * 不能因为编号前缀不合模板就把正文里的问题静默丢掉。
    * 只认带方括号的那种会把整条 finding 静默丢掉 —— 那不只是少报一条复核：写在标题里的 BLOCK 会被当成
    * 「一条阻断都没有」，门禁就白过了。判 INVALID 的是语义问题（枚举冲突 / 缺证据 / 计数不符……），不是标题的排版。
    */
-  const headings = [...documentText.matchAll(/^###[ \t]*\[?((?:BLOCK|REVIEW)-\d+)\]?[ \t]*(.*)$/gim)];
+  const headings = [...documentText.matchAll(/^###[ \t]*\[?((?:BLOCK|REVIEW|FIND)-\d+)\]?[ \t]*(.*)$/gim)];
   for (let index = 0; index < headings.length; index += 1) {
     const start = headings[index].index;
     const end = headings[index + 1]?.index ?? documentText.length;
@@ -138,15 +163,22 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
     const field = (labels) => (block.match(new RegExp(`^- (?:${labels.join('|')}):\\s*(.+?)\\s*$`, 'm'))?.[1] ?? '')
       .replace(/`/g, '')
       .trim();
-    // finding ID 前缀是 kind 的权威来源：标题正则已把 ID 限定为 BLOCK-*/REVIEW-*。
+    // BLOCK-* / REVIEW-* 的前缀是 kind 的权威来源；FIND-* 是模型排版偏差，
+    // 必须由明确且有效的 Severity 字段补出 kind，否则 fail-closed。
     // `- Severity:` 只作人读字段——写成 human 等级词（high / medium / non-blocking）或漏反引号都不再让
     // 整份报告失效；但它与 ID 前缀**冲突**时仍然报错：那是报告自相矛盾，不能默默采信。
     const severityFromId = id.split('-')[0];
     const severityField = field(['Severity', '严重级别']);
-    if (SEVERITIES.has(severityField) && severityField !== severityFromId) {
+    if (severityFromId !== 'FIND' && SEVERITIES.has(severityField) && severityField !== severityFromId) {
       throw new Error(`finding ${id} 的 Severity 字段（${severityField}）与 ID 前缀（${severityFromId}）不一致`);
     }
+    if (severityFromId === 'FIND' && !SEVERITIES.has(severityField)) {
+      throw new Error(`finding ${id} 使用 FIND 前缀时必须用 Severity 明确 BLOCK 或 REVIEW`);
+    }
     const severity = SEVERITIES.has(severityField) ? severityField : severityFromId;
+    if (severityFromId === 'FIND') {
+      notes.push(`finding ${id} 使用非标准 ID：按 Severity=${severity} 归类`);
+    }
     const category = field(['Category', '类别']) || null;
     const confidence = field(['Confidence', '置信度']);
     const scope = field(['Scope', '范围']) || null;
@@ -209,5 +241,17 @@ export function parseAuditReport(markdown, { title = '# 插件语义审计' } = 
   }
   const result = derivedResult;
 
-  return { result, blockingFindings: actualBlocking, reviewFindings: actualReview, changedPlugins, findings, notes, markdown: normalizedMarkdown };
+  return {
+    result,
+    blockingFindings: actualBlocking,
+    reviewFindings: actualReview,
+    changedPlugins,
+    findings,
+    notes,
+    markdown: synchronizeSummary(normalizedMarkdown, {
+      result,
+      blockingFindings: actualBlocking,
+      reviewFindings: actualReview
+    })
+  };
 }
